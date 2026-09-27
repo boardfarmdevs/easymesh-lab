@@ -1,0 +1,12 @@
+'use strict';
+let speedBusy=false,speedMAC=null;
+async function renderSpeed(mac){if(mac)speedMAC=mac;if(speedBusy)return;speedBusy=true;try{
+ const data=await api('/api/speed'),online=Date.now()/1000-data.service.heartbeat<10;
+ $('speedService').textContent=online?'Endpoint online · http://10.203.88.1:8080 · local DHCP · no internet':'Endpoint is offline or has no recent heartbeat.';
+ const sessions=data.sessions.filter(s=>s.online);
+ $('speedClients').innerHTML=sessions.length?sessions.map(s=>`<div class="speed-client ${s.mac===speedMAC?'chosen':''}"><div><strong>${esc(s.ip==='10.203.88.1'?'Host self-test (not Wi-Fi)':s.mac||'MAC not yet resolved')}</strong><small>${esc(s.ip)} · browser endpoint ready</small></div><button class="button accent" data-speed-session="${esc(s.id)}" ${!online||source!=='live'?'disabled':''}>Start speed test →</button></div>`).join(''):'<p>No active client page yet. On your phone, join EasyMesh-Lab and open <strong>http://10.203.88.1:8080</strong>. Keep Safari open and the screen unlocked.</p>';
+ if(speedMAC&&!sessions.some(s=>s.mac===speedMAC))$('speedClients').innerHTML+=`<p class="muted">Selected client ${esc(speedMAC)} has not opened the test page recently. A 1905 association report alone cannot start a traffic test.</p>`;
+ $('speedResults').innerHTML=data.results.length?data.results.map(r=>`<div class="speed-result"><div><strong>${esc(r.ip==='10.203.88.1'?'Host self-test (not Wi-Fi)':r.mac||r.ip)}</strong><small>${esc(r.ip)} · ${when(r.finished_at)}</small></div>${r.status==='complete'?`<div><b>${r.download.mbps}</b><small>Mbps download</small></div><div><b>${r.upload.mbps}</b><small>Mbps upload</small></div><div><b>${r.http_latency_ms}</b><small>ms HTTP latency</small></div>`:`<p>Failed: ${esc(r.error)}</p>`}</div>`).join(''):'<p>No completed tests. Start from this panel or from the client page.</p>';
+ }catch(e){$('speedService').textContent=e.message;}finally{speedBusy=false;}}
+$('speedClients').onclick=async e=>{const b=e.target.closest('[data-speed-session]');if(!b)return;try{if(source!=='live')throw Error('Switch to Live before starting a speed test.');b.disabled=true;await api('/api/speed/start',{session:b.dataset.speedSession});toast('Speed test queued. Keep the client page open.');}catch(e){toast(e.message,true);}finally{b.disabled=false;}};
+$('speedRefresh').onclick=()=>renderSpeed();setInterval(()=>{if(activeTab==='speed')renderSpeed();},2500);

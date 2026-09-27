@@ -1,0 +1,25 @@
+# Credentials, live observations, queues, and captures
+/config.json
+/state.json
+/events.jsonl
+/commands/
+/results/
+/speed/
+/replays/
+/run*/
+/onboarding.paused
+*.pcap
+*.pcapng
+*.log
+*.pid
+*.lock
+*.tmp
+.env
+.env.*
+# Local Python and browser tooling
+__pycache__/
+*.py[cod]
+.venv/
+.browser-venv/
+.pytest_cache/
+/test-artifacts/
