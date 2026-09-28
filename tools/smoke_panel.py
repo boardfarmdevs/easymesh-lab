@@ -32,7 +32,7 @@ try:
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.goto(url, wait_until='networkidle')
-        for tab in ('studio', 'telemetry', 'topology', 'speed', 'learn', 'wire'):
+        for tab in ('studio', 'telemetry', 'topology', 'speed', 'learn', 'experiments', 'wire'):
             page.locator(f'.nav[data-tab="{tab}"]').click()
         assert page.locator('#sessionSource option').count() == 1 + len(boot['replays'])
         page.set_viewport_size({'width':390, 'height':844})

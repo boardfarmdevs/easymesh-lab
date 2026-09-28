@@ -15,6 +15,13 @@ This is an experimental **single-agent** lab, not a certified or complete EasyMe
 - Local browser speed tests initiated by the client or the controller panel. These require an open cooperating browser; IEEE 1905.1 cannot make an arbitrary client run this application test.
 - Optional Python DHCP server, isolated network namespace, and independent full Ethernet capture.
 
+## Build the LXD lab
+
+Use the host checkout to [build a fresh VM](deploy/lxd-vm/README.md), including
+the controller, panel, capture services and OpenSpeedTest. On rev120 the source
+checkout is `/home/rev/easymesh-lab`; the VM runs its deployed copy at
+`/opt/easymesh-lab`.
+
 ## Quick start: offline
 
 Python 3.10 or newer:
@@ -88,3 +95,9 @@ A controller-side [optimizer scaffold](docs/OPTIMIZER.md) evaluates measurements
 | `test_*.py` | Offline validation and synthetic fixtures |
 
 Protocol references and publication notes are in [REFERENCES.md](docs/REFERENCES.md). No license has been selected yet; add your chosen license before granting reuse rights.
+
+See [Single-extender experiments and the 1905.1 oscilloscope](docs/LEARNING-LAB.md) for supervised steering, persistent client history, guided TLV exercises, optimizer observation and 6 GHz diagnostics.
+
+See [LXD VM deployment](deploy/lxd-vm/README.md) for native services, USB ownership, OpenSpeedTest, isolation and rollback.
+
+USB Wi-Fi clients: see [managed client namespaces and iperf3](docs/USB-WIFI-CLIENTS.md).

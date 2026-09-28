@@ -6,6 +6,8 @@ import time
 import uuid
 from protocol import build_command, decode_packet, EXPECT, LOOKUP
 from wsc import validate_config
+from experiments import SteeringTracker, validate_steering, observe_onboarding
+from client_telemetry import client_views
 
 BASE=Path(__file__).resolve().parent
 
@@ -22,6 +24,7 @@ class Workbench:
         self.c=controller;self.gid=controller.args.config.stat().st_gid
         self.pending={};self.workflows={};self.command_id=None;self.next_heartbeat=0
         self.auto_poll=True
+        self.steering=SteeringTracker(self.emit,self.result);self.next_history=0
         owner=controller.args.config.stat()
         for name in ('commands','results'):
             directory=BASE/name;directory.mkdir(exist_ok=True)
@@ -30,8 +33,23 @@ class Workbench:
         self.stream=self.path.open('a',buffering=1)
         os.chown(self.path,-1,self.gid);os.chmod(self.path,0o640)
         self.emit('notice',message='Controller session started',session=uuid.uuid4().hex)
+        for path in (BASE/'results').glob('*.json'):
+            try:
+                old=json.loads(path.read_text());steering=old.get('steering',{})
+                if steering.get('outcome') in ('awaiting_evidence','awaiting_association'):
+                    self.result(path.stem,steering={**steering,'outcome':'tracking_interrupted_by_restart'})
+            except (OSError,ValueError):continue
     def emit(self,event,**data):
-        self.stream.write(json.dumps(dict(id=uuid.uuid4().hex,time=time.time(),event=event,**data))+'\n')
+        record=dict(id=uuid.uuid4().hex,time=time.time(),event=event,**data)
+        self.stream.write(json.dumps(record)+'\n')
+        if event=='client_sample' or event.startswith('steering_'):
+            path=BASE/'run'/'client-history.jsonl'
+            path.parent.mkdir(exist_ok=True)
+            # Bounded private history: retain one previous 8 MiB segment.
+            if path.exists() and path.stat().st_size>8*1024*1024:
+                os.replace(path,path.with_suffix('.previous.jsonl'))
+            with path.open('a') as out:out.write(json.dumps(record)+'\n')
+            os.chown(path,-1,self.gid);os.chmod(path,0o640)
     def result(self,id,**data):
         path=BASE/'results'/f'{id}.json'
         old=json.loads(path.read_text()) if path.exists() else {'id':id,'created_at':time.time()}
@@ -58,9 +76,22 @@ class Workbench:
             path=BASE/'results'/f'{command}.json';old=json.loads(path.read_text())
             mids=old.get('mids',[])+[decoded['mid']]
             self.result(command,status='sent',mids=mids)
+        observe_onboarding(self.c.state,direction,decoded,time.time())
+        self.steering.packet(direction,decoded,command,time.time())
         self.emit('packet',direction=direction,packet=decoded,command_id=command,origin='manual' if command else 'automatic')
     def tick(self):
         now=time.time()
+        self.steering.tick(now)
+        if now>=self.next_history:
+            bands={k:v.get('rf_bands') for k,v in self.c.state.get('radios',{}).items()}
+            for obs in self.c.state.get('observations',{}).values():
+                if obs.get('type')==0x85:
+                    f=obs['fields'];classes=[c['class'] for c in f.get('operating_classes',[])]
+                    if any(131<=c<=137 for c in classes):bands[f['radio']]=8
+                    elif any(115<=c<=130 for c in classes):bands[f['radio']]=2
+                    elif any(81<=c<=84 for c in classes):bands[f['radio']]=1
+            self.emit('client_sample',clients=client_views(self.c.state,now=now),bss=self.c.state.get('operational_bss',[]),radios=bands)
+            self.next_history=now+15
         for mid,p in list(self.pending.items()):
             if now-p['time']>30:
                 path=BASE/'results'/f"{p['id']}.json"
@@ -82,6 +113,8 @@ class Workbench:
                 req=json.loads(path.read_text());name=req['name'];params=req.get('params',{})
                 if name not in LOOKUP:raise ValueError('Unknown command')
                 self.result(id,name=name,status='processing',title=LOOKUP[name]['title'])
+                if name in ('set_ssid','reonboard','enable_6ghz') and (BASE/'onboarding.paused').exists():
+                    raise ValueError('Onboarding is paused to preserve the manual 6 GHz BSS; resume it deliberately before reconfiguration.')
                 self.command_id=id
                 if name in ('set_ssid','reonboard','enable_6ghz'):
                     config=dict(self.c.config)
@@ -99,6 +132,7 @@ class Workbench:
                     if str(params.get('enabled')) not in ('true','false'):raise ValueError('enabled must be true or false')
                     self.auto_poll=params['enabled']=='true';self.result(id,status='applied',note='Automatic queries '+('enabled' if self.auto_poll else 'paused'))
                 else:
+                    if name=='steer':validate_steering(params,self.c.state,time.time())
                     for kind,body in build_command(name,params,self.c.state):self.c.send(kind,body)
                 self.emit('command',command_id=id,name=name,title=LOOKUP[name]['title'])
             except (ValueError,KeyError,TypeError,OSError) as e:

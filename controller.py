@@ -54,6 +54,7 @@ class Controller:
             old=json.loads(args.state.read_text())
             if old.get('target')==args.target:
                 self.state['radios']=old.get('radios',{})
+                if old.get('onboarding_evidence'):self.state['onboarding_evidence']=old['onboarding_evidence']
         self.cache={}; self.last_response={}; self.next_query=0; self.next_discovery=0; self.next_client_metrics=0; self.client_poll_cursor=0
         self.mid=secrets.randbelow(65536); self.running=True; self.known=False
         self.sock=socket.socket(socket.AF_PACKET,socket.SOCK_RAW,socket.htons(0x893a))
@@ -105,8 +106,14 @@ class Controller:
         self.send(6,body,mid)
 
     def handle(self,raw):
-        m=parse(raw)
-        if not m or m['src']!=self.args.target or m['dst'] not in (MULTICAST,self.args.controller):return
+        try:m=parse(raw)
+        except ValueError:
+            if hasattr(self,'workbench'):self.workbench.packet('unknown',raw)
+            raise
+        if not m or m['src']!=self.args.target or m['dst'] not in (MULTICAST,self.args.controller):
+            if m and m['src']!=self.args.controller and hasattr(self,'workbench'):
+                self.workbench.packet('unknown',raw)
+            return
         self.known=True; v=m['tlvs']; kind=m['kind']
         if hasattr(self,'workbench'):self.workbench.packet('RX',raw)
         log('rx',kind=f'0x{kind:04x}',mid=m['mid'],tlvs={f'0x{k:02x}':[x.hex() for x in vals] for k,vals in v.items()})
@@ -200,9 +207,9 @@ class Controller:
                         self.config=config; self.cache.clear(); self.state['status']='renew_requested'
                         self.renew(); self.checkpoint(); log('config_reloaded',ssid=config['ssid'],revision=config['revision'])
                 except (ValueError,KeyError) as e:log('config_rejected',reason=str(e))
-                if now>=self.next_discovery:
+                if getattr(self.args,'discovery_interval',60)>0 and now>=self.next_discovery:
                     mac=macbytes(self.args.controller)
-                    self.send(0,tlv(1,mac)+tlv(2,mac),dst=MULTICAST); self.next_discovery=now+60
+                    self.send(0,tlv(1,mac)+tlv(2,mac),dst=MULTICAST); self.next_discovery=now+getattr(self.args,'discovery_interval',60)
                 if self.workbench.auto_poll and self.known and now>=self.next_query:
                     self.send(2); self.send(0x8001); self.next_query=now+30
                 if self.workbench.auto_poll and self.known and now>=self.next_client_metrics:
@@ -222,6 +229,7 @@ def main():
     p.add_argument('--interface',default=None)
     p.add_argument('--controller',default=None)
     p.add_argument('--target',default=None)
+    p.add_argument('--discovery-interval',type=float,default=60,help='Topology discovery announcement interval in seconds; 0 disables announcements for interoperability diagnosis')
     p.add_argument('--ssid'); p.add_argument('--password-file',type=Path)
     a=p.parse_args()
     if a.command=='init':

@@ -1,0 +1,10 @@
+[Unit]
+Description=Enrolled USB Wi-Fi lab clients in separate namespaces
+After=network.target
+[Service]
+ExecStart=/usr/bin/python3 /opt/easymesh-lab/tools/wifi_clients.py
+Restart=on-failure
+RestartSec=5
+UMask=0077
+[Install]
+WantedBy=multi-user.target

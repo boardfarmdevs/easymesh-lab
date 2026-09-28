@@ -13,6 +13,7 @@ import uuid
 import speed_store
 from client_telemetry import client_views
 from optimizer import advisory_report
+from experiments import validate_steering
 from controller import frame
 from protocol import CATALOG,LOOKUP,build_command,decode_packet,MESSAGE_NAMES,TLV_NAMES
 from wsc import validate_config
@@ -31,6 +32,7 @@ def state():
     s['controller_online']=time.time()-s.get('heartbeat_at',0)<10
     s['agent_recent']=time.time()-s.get('last_agent_at',0)<90
     s['client_telemetry']=client_views(s,read_json(BASE/'run/device-evidence.json',{}),speed_store.sessions())
+    s['managed_radio_observations']=read_json(BASE/'run/wifi-radio-observations.json',[])
     s['optimizer']=advisory_report(s['client_telemetry'],s)
     return s
 
@@ -45,7 +47,10 @@ def validate(name,params):
         validate_config(c)
     elif name=='polling':
         if params.get('enabled') not in ('true','false'):raise ValueError('Select true or false')
-    else:build_command(name,params,state())
+    else:
+        current=state()
+        if name=='steer':validate_steering(params,current,time.time())
+        build_command(name,params,current)
 
 def preview(name,params):
     validate(name,params);s=state();src=s.get('controller','02:00:00:00:00:01');dst=s.get('target','02:00:00:00:01:35')
@@ -86,6 +91,18 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if q.path=='/api/bootstrap':return self.send_json({'token':TOKEN,'catalog':CATALOG,'messages':MESSAGE_NAMES,'tlvs':TLV_NAMES,'state':state(),'replays':list(REPLAYS)})
             if q.path=='/api/state':return self.send_json(state())
+            if q.path=='/api/history':
+                history=[]
+                for filename in ('client-history.previous.jsonl','client-history.jsonl'):
+                    path=BASE/'run'/filename
+                    if not path.exists():continue
+                    with path.open('rb') as f:
+                        start=max(0,path.stat().st_size-1500000);f.seek(start)
+                        if start:f.readline()
+                        for line in f:
+                            try:history.append(json.loads(line))
+                            except ValueError:pass
+                return self.send_json({'events':history[-2000:],'limit':2000})
             if q.path=='/api/speed':return self.send_json(speed_store.snapshot())
             if q.path=='/api/events':
                 p=BASE/'events.jsonl';events=[];cursor=0
@@ -122,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
                 name=params.get('name',['onboarding'])[0]
                 if name not in REPLAYS:raise ValueError('Unknown capture')
                 return self.send_bytes(REPLAYS[name].read_bytes(),'application/octet-stream')
-            files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/topology.js':'topology.js','/speed.js':'speed.js','/telemetry.js':'telemetry.js'}
+            files={'/':'index.html','/app.js':'app.js','/style.css':'style.css','/topology.js':'topology.js','/speed.js':'speed.js','/telemetry.js':'telemetry.js','/learning.js':'learning.js'}
             if q.path not in files:return self.send_json({'error':'Not found'},404)
             file=BASE/'panel'/files[q.path]
             return self.send_bytes(file.read_bytes(),mimetypes.guess_type(file)[0] or 'text/plain')

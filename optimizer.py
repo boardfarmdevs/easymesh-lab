@@ -85,4 +85,4 @@ def advisory_report(views, state, now=None):
         client={**view,**associations.get(mac,{}),'ssid':bsses.get(view['bssid'],{}).get('ssid')}
         out.append(policy.assess(client,[],now))
     return {'mode':'advisory','automatic_steering':False,'clients':out,
-            'next_requirement':'Candidate-BSS measurement adapter and multi-agent topology before enabling automatic execution.'}
+            'next_requirement':'Fresh comparable candidate-BSS measurements, compatibility evidence and reviewed policy are required. A target may be another band on this agent; a second agent is not required for band steering.'}
