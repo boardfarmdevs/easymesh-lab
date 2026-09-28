@@ -18,9 +18,9 @@ This is an experimental **single-agent** lab, not a certified or complete EasyMe
 ## Build the LXD lab
 
 Use the host checkout to [build a fresh VM](deploy/lxd-vm/README.md), including
-the controller, panel, capture services and OpenSpeedTest. On rev120 the source
-checkout is `/home/rev/easymesh-lab`; the VM runs its deployed copy at
-`/opt/easymesh-lab`.
+the controller, panel, capture services and OpenSpeedTest. Use any suitable
+Linux/LXD host and supply its network, storage and hardware parameters. The
+VM runs its deployed copy at `/opt/easymesh-lab`.
 
 ## Quick start: offline
 

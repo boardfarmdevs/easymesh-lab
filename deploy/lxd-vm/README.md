@@ -7,43 +7,53 @@ owns the VM, USB attachment and management port forwarding.
 
 ## Build from a clean host checkout
 
-The maintained source checkout on rev120 is `/home/rev/easymesh-lab`.
-Edit, test and commit there. `/opt/easymesh-lab` inside the VM is the deployed
+Clone this repository anywhere on the chosen host. Edit, test and commit
+in that host checkout. `/opt/easymesh-lab` inside the VM is the deployed
 runtime copy; new builds include committed source only, never host secrets,
 captures, virtual environments or uncommitted changes. `BUILD.json` records
 the source and OpenSpeedTest revisions. An existing VM is never overwritten.
 
 Prerequisites: Linux with working LXD VM support, access to `lxc`, Python 3,
 Git, a managed LXD bridge with DHCP, an existing storage pool, and internet
-access for the build's Ubuntu/Python/OpenSpeedTest downloads. The default
+access for the build's Ubuntu/Python/OpenSpeedTest downloads. Network and storage pool names are explicit inputs, not assumed host defaults.
+The default
 image is Ubuntu 24.04; use `--image FINGERPRINT` to select an exact cached image.
 Package repositories remain moving inputs; this is a reproducible procedure,
 not a bit-identical image build. The lab subnet is fixed at 10.203.88.0/24.
 
-For a new host, initialize LXD and create a pool if needed:
+For a new host, initialize LXD and select/create a bridge and pool appropriate
+for that host. Inspect the resulting names with `lxc network list` and
+`lxc storage list`; the builder does not change shared host networks:
 
 ```sh
 lxd init
-lxc storage create easymesh-lab-pool dir
 git clone https://github.com/boardfarmdevs/easymesh-lab.git
 cd easymesh-lab
 ```
 
-Select an unused management address and unused host ports. This example uses
-rev120's bridge and a **new** VM name, leaving an existing lab running:
+Select an unused management address and host ports, the host's own LAN IP,
+the operator browser's IP, the Ethernet adapter's permanent MAC, and the
+agent's AL MAC. Replace the uppercase placeholders below:
 
 ```sh
 python3 deploy/lxd-vm/build_vm.py \
-  --name easymesh-lab-new --host-ip 192.168.2.120 \
-  --guest-ip 10.77.171.247 --network lxdbr0 --pool easymesh-lab-pool \
-  --lab-mac 6c:1f:f7:d1:59:7e --controller-mac c8:a3:62:eb:2f:63 \
-  --target 6c:4c:bc:58:28:35 --nic-driver r8152 \
-  --allow-client 192.168.2.140 --allow-client 192.168.2.200 \
-  --panel-port 8775 --speed-port 8776
+  --name mesh-lab --host-ip HOST_LAN_IP --guest-ip UNUSED_VM_IP \
+  --network MANAGEMENT_BRIDGE --pool STORAGE_POOL \
+  --lab-mac ADAPTER_MAC --target AGENT_AL_MAC \
+  --allow-client BROWSER_IP
 ```
 
-Use your own adapter/agent MACs. `--controller-mac` preserves a previous
-controller identity when replacing an Ethernet adapter; omit for a new lab.
+No specific host name, home directory, bridge name, pool name, USB adapter
+model or management subnet is required. The gateway comes from the selected
+LXD bridge. Normal kernel probing selects the USB driver; `--nic-driver r8152`
+or `--nic-driver cdc_ncm` optionally verifies a known driver. Pass
+`--controller-mac OLD_CONTROLLER_MAC` only when preserving a previous
+controller identity while changing Ethernet adapters. Add `--panel-host DNS_NAME`
+for any DNS aliases used in the browser. Repeat `--allow-client` for additional
+operators. Use `--panel-port` and `--speed-port` when the default 8765/8766 ports
+are occupied. The builder rejects an existing instance name and requires a
+clean Git checkout. It attaches no host hardware automatically.
+
 The builder creates a dedicated 4-vCPU/4-GiB/48-GiB VM, installs dependencies,
 generates private credentials, configures isolation and services, installs
 pinned OpenSpeedTest assets, and exposes the panel. USB devices are attached

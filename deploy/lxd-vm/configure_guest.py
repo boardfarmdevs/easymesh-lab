@@ -23,14 +23,17 @@ def main():
     p.add_argument('--lab-mac',required=True);p.add_argument('--target',required=True)
     p.add_argument('--host-ip',required=True);p.add_argument('--guest-ip',required=True)
     p.add_argument('--allow-client',action='append',default=[])
-    p.add_argument('--management-gateway',default='10.77.171.1')
+    p.add_argument('--management-gateway',required=True)
+    p.add_argument('--panel-host',action='append',default=[],help='Optional DNS name used to access the panel')
     p.add_argument('--controller-mac',help='Optional runtime MAC; lab-mac remains the physical MAC')
-    p.add_argument('--nic-driver',choices=['cdc_ncm','r8152'],default='r8152')
+    p.add_argument('--nic-driver',choices=['cdc_ncm','r8152'],help='Optional explicit driver check; otherwise use normal kernel USB probing')
     p.add_argument('--panel-port',type=int,default=8765)
     p.add_argument('--init-config',action='store_true',help='Generate fresh credentials and pause onboarding')
     a=p.parse_args()
     if not 1024 <= a.panel_port <= 65535:p.error('Invalid panel port')
     if os.geteuid()!=0:raise SystemExit('Run as root inside the dedicated VM')
+    for host in a.panel_host:
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*',host):p.error('Invalid panel hostname')
     for m in (a.lab_mac,a.target,a.controller_mac or a.lab_mac):
         if not re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}',m):raise SystemExit('Invalid MAC address')
     for ip in (a.host_ip,a.guest_ip,a.management_gateway,*a.allow_client):ipaddress.IPv4Address(ip)
@@ -39,8 +42,9 @@ def main():
     except KeyError:run('useradd','--system','--create-home','--home-dir','/var/lib/easymesh','--shell','/bin/bash','easymesh')
     for name in ('run/captures','commands','results','speed'):(BASE/name).mkdir(parents=True,exist_ok=True)
     run('chown','-R','easymesh:easymesh',str(BASE))
-    run('modinfo',a.nic_driver)  # Cloud images need linux-modules-extra for this USB NIC.
-    run('modprobe',a.nic_driver)
+    if a.nic_driver:
+        run('modinfo',a.nic_driver)
+        run('modprobe',a.nic_driver)
     run('python3','-m','venv',str(BASE/'.venv'))
     run(str(BASE/'.venv/bin/pip'),'install','-r',str(BASE/'requirements.txt'))
     if not (BASE/'config.json').exists():
@@ -102,7 +106,7 @@ else:raise SystemExit('Waiting for lab0 with 10.203.88.1')
       'observer':('root',f'{BASE}/.venv/bin/python -u {BASE}/device_observer.py --interface lab0',True),
       'speed':('easymesh',f'{BASE}/.venv/bin/python -u {BASE}/speed_server.py',True),
       'capture':('easymesh',f'/usr/bin/dumpcap -q -i lab0 -s 0 -b filesize:65536 -b files:32 -g -w {BASE}/run/captures/wired.pcapng',True),
-      'panel':('easymesh',f'{BASE}/.venv/bin/python -u {BASE}/panel_server.py --bind 0.0.0.0 --port {a.panel_port} --host {a.host_ip} --host {a.guest_ip} --host rev120 --host easymesh-lab '+ ' '.join('--allow-client '+ip for ip in sorted(set([a.host_ip,a.guest_ip,a.management_gateway,*a.allow_client]))),False)
+      'panel':('easymesh',f'{BASE}/.venv/bin/python -u {BASE}/panel_server.py --bind 0.0.0.0 --port {a.panel_port} --host {a.host_ip} --host {a.guest_ip} '+ ''.join('--host '+host+' ' for host in a.panel_host)+ ' '.join('--allow-client '+ip for ip in sorted(set([a.host_ip,a.guest_ip,a.management_gateway,*a.allow_client]))),False)
     }
     for name,(user,command,needs_link) in units.items():
         write(f'/etc/systemd/system/easymesh-{name}.service',f'''[Unit]

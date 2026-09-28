@@ -27,15 +27,19 @@ def main():
     p.add_argument('--target', required=True, help='Agent AL MAC')
     p.add_argument('--controller-mac')
     p.add_argument('--allow-client', action='append', default=[])
-    p.add_argument('--network', default='lxdbr0')
-    p.add_argument('--pool', default='easymesh-lab-pool', help='Existing LXD storage pool')
+    p.add_argument('--network', required=True, help='Existing managed LXD bridge with IPv4 DHCP')
+    p.add_argument('--pool', required=True, help='Existing LXD storage pool')
     p.add_argument('--image', default='ubuntu:24.04', help='Ubuntu 24.04 VM image alias or fingerprint')
-    p.add_argument('--nic-driver', choices=['r8152', 'cdc_ncm'], default='r8152')
+    p.add_argument('--nic-driver', choices=['r8152', 'cdc_ncm'], help='Optional explicit driver check')
+    p.add_argument('--panel-host', action='append', default=[])
     p.add_argument('--panel-port', type=int, default=8765)
     p.add_argument('--speed-port', type=int, default=8766)
     a = p.parse_args()
     if not re.fullmatch(r'[a-zA-Z][a-zA-Z0-9-]{0,62}', a.name):
         p.error('Invalid instance name')
+    for host in a.panel_host:
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9.-]*', host):
+            p.error('Invalid panel hostname')
     for mac in (a.lab_mac, a.target, a.controller_mac or a.lab_mac):
         if not re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}', mac):
             p.error('MAC addresses must be lowercase colon-separated hex')
@@ -47,6 +51,10 @@ def main():
     if any(i['name'] == a.name for i in instances):
         p.error('Instance exists; choose a new name. Existing labs are never overwritten.')
     gateway = ipaddress.IPv4Interface(output('lxc', 'network', 'get', a.network, 'ipv4.address'))
+    if gateway.network.overlaps(ipaddress.IPv4Network('10.203.88.0/24')):
+        p.error('Management network overlaps the application lab subnet 10.203.88.0/24')
+    if output('lxc', 'network', 'get', a.network, 'ipv4.dhcp') == 'false':
+        p.error('The management bridge must have IPv4 DHCP enabled')
     guest = ipaddress.IPv4Address(a.guest_ip)
     if guest not in gateway.network or guest in (gateway.ip, gateway.network.network_address, gateway.network.broadcast_address):
         p.error('Guest IP must be a usable address in the managed network')
@@ -92,8 +100,12 @@ def main():
     args = ['python3', '/opt/easymesh-lab/deploy/lxd-vm/configure_guest.py',
             '--init-config', '--lab-mac', a.lab_mac, '--target', a.target,
             '--host-ip', a.host_ip, '--guest-ip', a.guest_ip,
-            '--management-gateway', str(gateway.ip), '--nic-driver', a.nic_driver,
+            '--management-gateway', str(gateway.ip),
             '--panel-port', str(a.panel_port)]
+    if a.nic_driver:
+        args += ['--nic-driver', a.nic_driver]
+    for host in a.panel_host:
+        args += ['--panel-host', host]
     if a.controller_mac:
         args += ['--controller-mac', a.controller_mac]
     for client in a.allow_client:
