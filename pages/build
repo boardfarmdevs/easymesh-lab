@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Build this repository's Pages site into dist/site. This is the only per-repository
+# step: pages/finish-site.py, pages/labs-bar.js and .github/workflows/pages.yml are
+# the same in the five lab repositories.
+#
+# easymesh-lab: the static site in site/. Fails on a link to a file of this repository
+# that does not exist, and on a link to a missing #anchor. The stylesheet link carries
+# the stylesheet's hash, so a new page never renders with a cached older stylesheet.
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")/.."
+rm -rf dist/site
+mkdir -p dist
+cp -a site dist/site
+python3 - <<'CHECK'
+import re
+from pathlib import Path
+
+html = Path("site/index.html").read_text(encoding="utf-8")
+repo = r"https://github\.com/boardfarmdevs/easymesh-lab/(?:blob|tree)/main/([^\"#?]+)"
+missing = sorted({path for path in re.findall(repo, html) if not Path(path).exists()})
+anchors = set(re.findall(r'\sid="([^"]+)"', html))
+dangling = sorted({name for name in re.findall(r'href="#([^"]+)"', html) if name not in anchors})
+if missing or dangling:
+    raise SystemExit(f"site/index.html: missing repository files {missing}, missing anchors {dangling}")
+import hashlib
+version = hashlib.sha256(Path("site/style.css").read_bytes()).hexdigest()[:12]
+built = Path("dist/site/index.html")
+page = built.read_text(encoding="utf-8")
+if page.count('href="style.css"') != 1:
+    raise SystemExit('site/index.html: expected one href="style.css"')
+built.write_text(page.replace('href="style.css"', f'href="style.css?v={version}"'), encoding="utf-8")
+links = len(re.findall(repo, html))
+internal = len(re.findall(r'href="#', html))
+print(f"Built dist/site from site/: {links} repository links and {internal} anchor links checked")
+CHECK

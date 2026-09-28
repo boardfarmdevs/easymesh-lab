@@ -23,3 +23,5 @@ __pycache__/
 .browser-venv/
 .pytest_cache/
 /test-artifacts/
+# the built Pages site (pages/build)
+/dist/

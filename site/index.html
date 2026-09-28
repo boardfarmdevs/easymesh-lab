@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EasyMesh Protocol Lab</title>
+<meta name="description" content="A physical EasyMesh lab: a Python IEEE 1905.1 / EasyMesh controller written from scratch and a browser teaching panel, driving a certified TP-Link RE653BE extender with real tri-band clients.">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <nav class="topnav" aria-label="Sections">
+    <a class="brand" href="#top"><img src="icon.svg" width="24" height="24" alt=""><span>1905<span class="brand-sub"> · Protocol Lab</span></span></a>
+    <div class="navlinks">
+      <a href="#what">What it is</a>
+      <a href="#panel">Panel</a>
+      <a href="#findings">Findings</a>
+      <a href="#state">Current state</a>
+      <a href="#run">Run it</a>
+      <a href="#docs">Docs</a>
+    </div>
+    <a class="repo" href="https://github.com/boardfarmdevs/easymesh-lab">GitHub&nbsp;↗</a>
+  </nav>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <p class="eyebrow">boardfarmdevs labs · Physical EasyMesh</p>
+    <h1>The EasyMesh protocol on a real extender, one message at a time</h1>
+    <p class="lead">A controller written from scratch in Python speaks IEEE 1905.1 and EasyMesh over
+    raw Ethernet to a certified extender, the TP-Link RE653BE. A browser panel shows every CMDU and TLV,
+    correlates requests with responses, draws the topology and sends commands. Phones, tablets and
+    laptops join the extender's 2.4, 5 and 6 GHz networks, and USB Wi-Fi 7 adapters add managed clients
+    for repeatable tests.</p>
+    <figure class="scope" aria-labelledby="scope-caption">
+      <svg viewBox="0 0 960 190" role="img" aria-label="A 1905.1 exchange drawn as an oscilloscope trace: discovery, autoconfiguration search and response, WSC M1 and M2, topology query and response, AP capability, metrics and a steering request with its ACK. Controller transmissions on the upper lane, agent transmissions on the lower lane.">
+        <rect class="scope-bg" x="0" y="0" width="960" height="190" rx="10"/>
+        <g class="grid">
+          <path d="M40 30H930M40 95H930M40 160H930"/>
+          <path d="M218 20V170M396 20V170M574 20V170M752 20V170"/>
+        </g>
+        <text class="lane" x="46" y="22">controller TX</text>
+        <text class="lane" x="46" y="174">agent TX</text>
+        <g class="pulses">
+          <path class="p discovery" d="M70 150V110H84V150"/>
+          <path class="p discovery" d="M118 70V30H132V70"/>
+          <path class="p wsc" d="M175 150V110H189V150"/>
+          <path class="p wsc" d="M228 70V30H242V70"/>
+          <path class="p topology" d="M300 70V30H314V70"/>
+          <path class="p topology" d="M336 150V110H350V150"/>
+          <path class="p capability" d="M420 70V30H434V70"/>
+          <path class="p capability" d="M454 150V110H468V150"/>
+          <path class="p metrics" d="M540 70V30H554V70"/>
+          <path class="p metrics" d="M570 150V110H584V150"/>
+          <path class="p metrics" d="M640 150V110H654V150"/>
+          <path class="p steering" d="M720 70V30H734V70"/>
+          <path class="p ack" d="M752 150V110H766V150"/>
+          <path class="p steering" d="M842 150V110H856V150"/>
+        </g>
+        <g class="mid">
+          <path d="M307 72C318 96 330 100 343 108"/>
+          <path d="M427 72C438 96 450 100 461 108"/>
+          <path d="M727 72C738 96 748 100 759 108"/>
+        </g>
+        <g class="labels">
+          <text x="100" y="98">discovery · search</text>
+          <text x="208" y="98">WSC M1 / M2</text>
+          <text x="325" y="18">topology</text>
+          <text x="444" y="18">AP capability</text>
+          <text x="597" y="18">link metrics</text>
+          <text x="788" y="18">steering · ACK · BTM</text>
+        </g>
+      </svg>
+      <figcaption id="scope-caption">How the panel's Live wire view draws an exchange: one lane per direction,
+      one colour per message family, dotted links between matching message IDs. Pulse width is
+      decorative; the rising edge is the capture time.</figcaption>
+    </figure>
+    <p class="hero-actions"><a class="button" href="#run">Run it</a> <a class="button ghost" href="https://github.com/boardfarmdevs/easymesh-lab">Source on GitHub</a></p>
+  </section>
+
+  <section id="what">
+    <h2>What it is</h2>
+    <p class="section-lead">The fifth project of the <a href="https://boardfarmdevs.github.io/easymesh-labs/">boardfarmdevs EasyMesh labs</a>,
+    and the only one on physical hardware. The other four simulate radios on wmediumd; this one checks the
+    protocol against a certified device, real radios and real clients. Its name is one letter from the
+    umbrella's: <code>easymesh-lab</code> is this lab, <code>easymesh-labs</code> the umbrella.</p>
+    <div class="cards">
+      <article class="card">
+        <p class="tag">Controller</p>
+        <h3>1905.1 and EasyMesh from scratch</h3>
+        <p>Python on a raw Ethernet socket: topology discovery and queries, AP capabilities, WSC M1/M2
+        credential exchange with its crypto, SSID changes and re-onboarding, metrics, beacon queries,
+        channel selection, policy, steering and raw TLVs. Unknown TLVs stay visible as bytes.</p>
+      </article>
+      <article class="card">
+        <p class="tag">Teaching panel</p>
+        <h3>Every message, decoded and correlated</h3>
+        <p>Vanilla JavaScript in the browser: the packet timeline with TLV trees and raw hex, an
+        oscilloscope view of the exchange, a command studio that previews before it sends, radios and
+        telemetry, a spring-layout topology, speed tests and guided experiments.</p>
+      </article>
+      <article class="card">
+        <p class="tag">Physical setup</p>
+        <h3>A certified extender and real clients</h3>
+        <p>A TP-Link RE653BE on a dedicated USB Ethernet adapter. Phones, tablets and laptops join its
+        tri-band BSSes; enrolled MT7925U USB Wi-Fi 7 adapters act as managed stations, each in its own
+        network namespace, for iperf3 through the extender.</p>
+      </article>
+    </div>
+
+    <figure class="diagram">
+      <svg viewBox="0 0 960 330" role="img" aria-label="Layout: an LXD host runs the lab VM with the controller, panel, observer, capture, speed and OpenSpeedTest services. A dedicated USB Ethernet adapter, passed into the VM as lab0, carries IEEE 1905.1 to the TP-Link RE653BE extender. The extender's 2.4, 5 and 6 GHz radios serve phones, tablets and laptops, and USB Wi-Fi clients passed into the VM, each in its own namespace.">
+        <rect class="zone" x="10" y="10" width="560" height="310" rx="12"/>
+        <text class="zone-t" x="30" y="36">LXD host (rev120)</text>
+        <rect class="zone vm" x="30" y="52" width="520" height="190" rx="10"/>
+        <text class="zone-t" x="48" y="76">Lab VM · Ubuntu 24.04 · /opt/easymesh-lab</text>
+        <rect class="svc ctl" x="48" y="92" width="150" height="46" rx="7"/>
+        <text class="svc-t" x="123" y="112">controller</text><text class="svc-s" x="123" y="128">1905.1 · WSC</text>
+        <rect class="svc" x="210" y="92" width="150" height="46" rx="7"/>
+        <text class="svc-t" x="285" y="112">panel</text><text class="svc-s" x="285" y="128">browser, port 8765</text>
+        <rect class="svc" x="372" y="92" width="160" height="46" rx="7"/>
+        <text class="svc-t" x="452" y="112">observer · history</text><text class="svc-s" x="452" y="128">DHCP/mDNS hints</text>
+        <rect class="svc" x="48" y="150" width="150" height="46" rx="7"/>
+        <text class="svc-t" x="123" y="170">capture</text><text class="svc-s" x="123" y="186">ring of pcaps</text>
+        <rect class="svc" x="210" y="150" width="150" height="46" rx="7"/>
+        <text class="svc-t" x="285" y="170">speed</text><text class="svc-s" x="285" y="186">OpenSpeedTest, iperf3</text>
+        <rect class="svc" x="372" y="150" width="160" height="46" rx="7"/>
+        <text class="svc-t" x="452" y="170">Wi-Fi clients</text><text class="svc-s" x="452" y="186">one namespace each</text>
+        <text class="svc-s" x="290" y="228">isolated: no forwarding, 1905.1 never routed to the management LAN</text>
+        <rect class="usb" x="48" y="262" width="210" height="44" rx="7"/>
+        <text class="svc-t" x="153" y="281">USB Ethernet → lab0</text><text class="svc-s" x="153" y="297">10.203.88.1/24</text>
+        <rect class="usb" x="300" y="262" width="232" height="44" rx="7"/>
+        <text class="svc-t" x="416" y="281">USB Wi-Fi 7 (MT7925U)</text><text class="svc-s" x="416" y="297">managed clients</text>
+        <path class="wire" d="M123 196V262"/>
+        <path class="wire" d="M452 196V262"/>
+        <rect class="dev" x="640" y="40" width="300" height="80" rx="10"/>
+        <text class="dev-t" x="790" y="72">TP-Link RE653BE</text>
+        <text class="svc-s" x="790" y="94">certified EasyMesh extender · agent</text>
+        <path class="wire eth" d="M153 306V316H600V80H640"/>
+        <text class="svc-s" x="604" y="200" style="text-anchor:start">1905.1 CMDUs</text>
+        <text class="svc-s" x="604" y="216" style="text-anchor:start">over Ethernet</text>
+        <g class="bands">
+          <rect class="band b24" x="650" y="140" width="84" height="30" rx="6"/><text x="692" y="160">2.4 GHz</text>
+          <rect class="band b5" x="748" y="140" width="84" height="30" rx="6"/><text x="790" y="160">5 GHz</text>
+          <rect class="band b6" x="846" y="140" width="84" height="30" rx="6"/><text x="888" y="160">6 GHz</text>
+        </g>
+        <path class="air" d="M692 170V232M790 170V232M888 170V232"/>
+        <rect class="dev" x="640" y="232" width="300" height="74" rx="10"/>
+        <text class="dev-t" x="790" y="262">Clients</text>
+        <text class="svc-s" x="790" y="284">phones, tablets, laptops · managed USB clients</text>
+        <path class="air" d="M532 284H640"/>
+      </svg>
+      <figcaption>The lab in one VM. The host only owns the VM, the USB attachments and the port forward to the
+      panel; everything the lab writes lives on the VM's disk.</figcaption>
+    </figure>
+  </section>
+
+  <section id="panel">
+    <h2>The teaching panel</h2>
+    <p class="section-lead">Each view is a learning task. A queued command is not success: the panel keeps
+    <em>sent</em>, <em>acknowledged</em>, <em>response received</em>, <em>no response</em> and an operational-SSID
+    confirmation apart, and a steering request counts as done only when a later association report shows the client
+    on the target.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>View</th><th>What you learn there</th></tr></thead>
+      <tbody>
+        <tr><td>Live wire</td><td>CMDU headers, TLV boundaries, raw bytes, request and response message IDs; the oscilloscope view with A/B time cursors and filters</td></tr>
+        <tr><td>Command studio</td><td>Preview a command's bytes, send it, and tell an ACK from an actual response</td></tr>
+        <tr><td>Radios and telemetry</td><td>Advertised capabilities against operational BSSes; client and link metrics; RCPI-derived signal bars with their age</td></tr>
+        <tr><td>Topology</td><td>Controller, agent, radio, BSS and client, in a spring layout you can drag, pan and zoom; stale associations marked as such</td></tr>
+        <tr><td>Speed test</td><td>Browser throughput from a cooperating client, or self-hosted OpenSpeedTest from a client on the extender</td></tr>
+        <tr><td>Experiments</td><td>Supervised steering, client history, guided queries, the advisory optimizer's reasoning, 6 GHz diagnostics</td></tr>
+        <tr><td>Learn / replay</td><td>Saved captures and the protocol dictionary, offline; replay never transmits</td></tr>
+      </tbody>
+    </table></div>
+    <figure class="topo" aria-labelledby="topo-caption">
+      <div class="mesh-card" style="background:#101c2e;color:#b3c7dc">
+        <div class="mesh-toolbar"><span><b>1</b> controller</span><span><b>1</b> agent</span><span><b>3</b> reported clients</span><span><b>3</b> radios / <b>3</b> BSSs</span></div>
+        <div class="mesh-stage">
+          <svg class="mesh-svg" font-family="system-ui, sans-serif" viewBox="162 -141 919 952" role="img" aria-label="Topology example: the Python controller wired to the EasyMesh agent over Ethernet with IEEE 1905.1; the agent's three EasyMesh-Lab BSSes on 6, 5 and 2.4 GHz; two managed USB Wi-Fi 7 clients on the 6 GHz BSS at about -31 and -42 dBm and an iPhone on the 5 GHz BSS at about -49 dBm. The 6 GHz BSS, channel 69 at 160 MHz, is selected.">
+<defs><pattern id="meshDots" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#35475c"/></pattern></defs><rect x="162" y="-141" width="919" height="952" fill="#101c2e"/><rect x="162" y="-141" width="919" height="952" fill="url(#meshDots)"/>
+<g class="mesh-edge wired"><path fill="none" stroke="#a9bed1" stroke-dasharray="7 6" stroke-width="2" d="M306.9 217.8L489.5 318.6"/><g class="edge-label" transform="translate(398.2 254.2)"><rect x="-65" y="-10" width="130" height="20" rx="10" fill="#101c2e" stroke="#30465d" stroke-width=".7"/><text text-anchor="middle" y="4" fill="#a2bbd1" font-size="10">Ethernet · 1905.1</text></g></g>
+<g class="mesh-edge membership"><path fill="none" stroke="#65778e" stroke-dasharray="2 6" stroke-width="1" d="M553.6 310.4L664.1 206.2"/></g>
+<g class="mesh-edge membership"><path fill="none" stroke="#65778e" stroke-dasharray="2 6" stroke-width="1" d="M549.1 369.4L638.7 484.2"/></g>
+<g class="mesh-edge membership"><path fill="none" stroke="#65778e" stroke-dasharray="2 6" stroke-width="1" d="M496.4 366.3L395.5 468.0"/></g>
+<g class="mesh-edge wireless"><path fill="none" stroke="#58d6b4" stroke-width="1.8" d="M713.3 144.2L714.7 142.1L716.3 140.1L717.6 137.9L718.4 135.4L718.9 132.8L719.7 130.3L721.2 128.2L723.5 126.6L726.1 125.2L728.2 123.5L729.0 121.0L728.6 117.9L728.0 114.6L728.3 111.8L730.3 110.0L733.7 109.1L737.4 108.3L739.8 106.8L740.2 104.0L738.8 100.3L737.2 96.4L737.2 93.5L739.6 91.9L743.9 91.5L748.4 91.2L751.2 89.8L751.1 86.9L749.0 82.7L746.8 78.5L746.5 75.4L749.2 74.0L754.1 73.9L759.2 73.9L762.0 72.6L761.8 69.6L759.2 65.2L756.7 60.7L756.3 57.6L759.2 56.3L764.4 56.4L769.5 56.4L772.4 55.2L772.0 52.0L769.5 47.6L766.9 43.2L766.7 40.1L769.6 38.8L774.6 38.8L779.5 38.7L782.2 37.4L781.9 34.3L779.7 30.0L777.6 25.8L777.5 22.9L780.3 21.5L784.8 21.2L789.1 20.8L791.5 19.3L791.5 16.3L789.9 12.4L788.5 8.7L788.9 6.0L791.3 4.4L795.0 3.7L798.4 2.7L800.4 0.9L800.7 -1.8L800.1 -5.1L799.8 -8.3L800.6 -10.7L802.6 -12.5L805.2 -13.9L807.5 -15.5L809.0 -17.6L809.8 -20.1L810.3 -22.7L811.1 -25.2L812.4 -27.3L814.0 -29.4L815.4 -31.5"/><g class="edge-label" transform="translate(764.4 42.4)"><rect x="-65" y="-10" width="130" height="20" rx="10" fill="#101c2e" stroke="#30465d" stroke-width=".7"/><text text-anchor="middle" y="4" fill="#a2bbd1" font-size="10">6 GHz</text></g></g>
+<g class="mesh-edge wireless"><path fill="none" stroke="#58d6b4" stroke-width="1.8" d="M732.1 188.0L734.6 188.8L737.0 189.7L739.5 190.3L742.1 190.4L744.8 190.1L747.4 190.1L749.8 191.0L752.0 192.7L754.2 194.8L756.5 196.3L759.1 196.3L762.0 195.1L765.0 193.6L767.8 193.1L770.1 194.5L772.0 197.5L773.8 200.7L776.0 202.6L778.8 202.2L781.9 199.8L785.2 197.2L788.0 196.3L790.2 198.2L791.9 202.2L793.5 206.4L795.7 208.6L798.5 207.7L801.9 204.5L805.3 201.2L808.2 200.0L810.3 202.2L811.8 206.9L813.3 211.7L815.4 214.1L818.3 212.9L821.8 209.3L825.3 205.5L828.3 204.3L830.3 206.7L831.8 211.6L833.2 216.5L835.3 218.9L838.2 217.7L841.8 214.0L845.3 210.3L848.2 209.2L850.2 211.6L851.7 216.3L853.2 221.0L855.4 223.2L858.3 222.1L861.7 218.7L865.1 215.5L867.9 214.6L870.0 216.8L871.7 221.1L873.3 225.1L875.5 226.9L878.4 226.0L881.6 223.4L884.8 221.1L887.6 220.6L889.7 222.5L891.6 225.8L893.5 228.8L895.8 230.2L898.6 229.7L901.6 228.1L904.5 226.9L907.1 227.0L909.4 228.4L911.5 230.5L913.7 232.3L916.2 233.1L918.8 233.1L921.5 232.9L924.1 232.9L926.6 233.5L929.0 234.5L931.5 235.2"/><g class="edge-label" transform="translate(831.8 197.6)"><rect x="-65" y="-10" width="130" height="20" rx="10" fill="#101c2e" stroke="#30465d" stroke-width=".7"/><text text-anchor="middle" y="4" fill="#a2bbd1" font-size="10">6 GHz</text></g></g>
+<g class="mesh-edge wireless"><path fill="none" stroke="#9aa5ff" stroke-width="1.8" d="M693.5 542.0L695.3 543.7L696.9 545.6L698.8 547.3L701.0 548.5L703.5 549.5L705.8 550.6L707.5 552.5L708.6 555.1L709.4 557.9L710.8 560.2L713.0 561.4L716.1 561.6L719.5 561.6L722.1 562.3L723.5 564.6L723.7 568.2L723.7 571.9L724.7 574.6L727.3 575.4L731.2 574.7L735.3 573.8L738.2 574.3L739.2 576.9L738.8 581.3L738.2 585.8L739.0 588.7L741.9 589.2L746.4 587.8L750.9 586.3L754.0 586.6L754.8 589.5L753.9 594.4L752.9 599.3L753.6 602.4L756.6 602.7L761.5 600.9L766.3 599.1L769.4 599.4L770.1 602.4L769.0 607.5L767.9 612.5L768.6 615.6L771.7 615.8L776.6 614.0L781.4 612.3L784.4 612.6L785.1 615.6L784.1 620.6L783.2 625.4L784.0 628.3L787.1 628.6L791.7 627.1L796.2 625.8L799.0 626.3L799.8 629.2L799.2 633.7L798.8 638.0L799.8 640.7L802.7 641.1L806.8 640.2L810.7 639.5L813.3 640.4L814.3 643.0L814.3 646.8L814.6 650.3L815.9 652.6L818.5 653.4L821.9 653.3L825.0 653.5L827.3 654.8L828.6 657.1L829.4 659.9L830.5 662.5L832.2 664.3L834.5 665.5L837.0 666.4L839.2 667.7L841.1 669.3L842.8 671.2L844.5 673.0"/><g class="edge-label" transform="translate(769.0 593.5)"><rect x="-65" y="-10" width="130" height="20" rx="10" fill="#101c2e" stroke="#30465d" stroke-width=".7"/><text text-anchor="middle" y="4" fill="#a2bbd1" font-size="10">5 GHz</text></g></g>
+<g class="mesh-node controller" transform="translate(271.9 198.4)" color="#ccdde9"><circle class="node-halo" r="46" fill="#0b1423" stroke="none" stroke-width="1.5"/><circle class="node-disc" r="35" fill="#153c48" stroke="#64d6c3" stroke-width="1.6"/><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="-21" y="-15" width="42" height="28" rx="4"/><path d="M-10 21H10M0 13V21M-12 -5L-5 0L-12 5M0 6H10"/></g><text class="node-kind" text-anchor="middle" y="-56" fill="#7d96ae" font-size="8" letter-spacing="2">CONTROLLER</text><text class="node-title" text-anchor="middle" y="64" fill="#dceaf5" font-size="14" font-weight="600">Python controller</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="82" fill="#94acc4" font-size="10">lab0 · raw 1905.1</text></g>
+<g class="mesh-node agent" transform="translate(524.5 337.9)" color="#ccdde9"><circle class="node-halo" r="46" fill="#0b1423" stroke="none" stroke-width="1.5"/><circle class="node-disc" r="35" fill="#193b4b" stroke="#64d6c3" stroke-width="1.6"/><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M-22 -13L0 -26L22 -13V13L0 26L-22 13Z"/><path d="M-12 -3Q0 -14 12 -3M-7 3Q0 -4 7 3"/><circle cx="0" cy="9" r="1.5"/></g><text class="node-kind" text-anchor="middle" y="-56" fill="#7d96ae" font-size="8" letter-spacing="2">AGENT</text><text class="node-title" text-anchor="middle" y="64" fill="#dceaf5" font-size="14" font-weight="600">EasyMesh agent</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="82" fill="#94acc4" font-size="10">TP-Link RE653BE</text></g>
+<g class="mesh-node bss selected" transform="translate(693.2 178.8)" color="#ccdde9"><circle class="node-halo" r="46" fill="#173647" stroke="#64d6c3" stroke-width="1.5"/><circle class="node-disc" r="35" fill="#1a2c41" stroke="#58d6b4" stroke-width="1.6"/><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M-20 -7Q0 -25 20 -7M-13 1Q0 -12 13 1M-6 9Q0 2 6 9"/><circle cx="0" cy="17" r="1.5"/></g><text class="node-kind" text-anchor="middle" y="-56" fill="#7d96ae" font-size="8" letter-spacing="2">BSS</text><text class="node-title" text-anchor="middle" y="64" fill="#dceaf5" font-size="14" font-weight="600">EasyMesh-Lab</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="82" fill="#94acc4" font-size="10">6 GHz · 2 clients</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="100" fill="#94acc4" font-size="10">Ch 69 · 160 MHz</text></g>
+<g class="mesh-node bss" transform="translate(663.3 515.7)" color="#ccdde9"><circle class="node-halo" r="46" fill="#0b1423" stroke="none" stroke-width="1.5"/><circle class="node-disc" r="35" fill="#1a2c41" stroke="#9aa5ff" stroke-width="1.6"/><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M-20 -7Q0 -25 20 -7M-13 1Q0 -12 13 1M-6 9Q0 2 6 9"/><circle cx="0" cy="17" r="1.5"/></g><text class="node-kind" text-anchor="middle" y="-56" fill="#7d96ae" font-size="8" letter-spacing="2">BSS</text><text class="node-title" text-anchor="middle" y="64" fill="#dceaf5" font-size="14" font-weight="600">EasyMesh-Lab</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="82" fill="#94acc4" font-size="10">5 GHz · 1 client</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="100" fill="#94acc4" font-size="10">Channel / width not reported</text></g>
+<g class="mesh-node bss" transform="translate(367.4 496.5)" color="#ccdde9"><circle class="node-halo" r="46" fill="#0b1423" stroke="none" stroke-width="1.5"/><circle class="node-disc" r="35" fill="#1a2c41" stroke="#ffc16c" stroke-width="1.6"/><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M-20 -7Q0 -25 20 -7M-13 1Q0 -12 13 1M-6 9Q0 2 6 9"/><circle cx="0" cy="17" r="1.5"/></g><text class="node-kind" text-anchor="middle" y="-56" fill="#7d96ae" font-size="8" letter-spacing="2">BSS</text><text class="node-title" text-anchor="middle" y="64" fill="#dceaf5" font-size="14" font-weight="600">EasyMesh-Lab</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="82" fill="#94acc4" font-size="10">2.4 GHz · 0 clients</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="100" fill="#94acc4" font-size="10">Channel / width not reported</text></g>
+<g class="mesh-node client" transform="translate(835.5 -66.1)" color="#ccdde9"><circle class="node-halo" r="46" fill="#0b1423" stroke="none" stroke-width="1.5"/><circle class="node-disc" r="35" fill="#252c4a" stroke="#58d6b4" stroke-width="1.6"/><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="-12" y="-22" width="24" height="44" rx="5"/><path d="M-4 -16H4M-3 16H3"/></g><g transform="translate(38,-16)"><rect x="0" y="15" width="4" height="5" rx="1" fill="#27ae60"/><rect x="6" y="10" width="4" height="10" rx="1" fill="#27ae60"/><rect x="12" y="5" width="4" height="15" rx="1" fill="#27ae60"/><rect x="18" y="0" width="4" height="20" rx="1" fill="#27ae60"/><text x="-38" y="66" text-anchor="middle" font-size="10" fill="#27ae60">≈-31 dBm</text></g><text class="node-kind" text-anchor="middle" y="-56" fill="#7d96ae" font-size="8" letter-spacing="2">CLIENT</text><text class="node-title" text-anchor="middle" y="64" fill="#dceaf5" font-size="14" font-weight="600">Wi-Fi client</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="82" fill="#94acc4" font-size="10">managed USB Wi-Fi 7</text></g>
+<g class="mesh-node client" transform="translate(970.4 244.4)" color="#ccdde9"><circle class="node-halo" r="46" fill="#0b1423" stroke="none" stroke-width="1.5"/><circle class="node-disc" r="35" fill="#252c4a" stroke="#58d6b4" stroke-width="1.6"/><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="-12" y="-22" width="24" height="44" rx="5"/><path d="M-4 -16H4M-3 16H3"/></g><g transform="translate(38,-16)"><rect x="0" y="15" width="4" height="5" rx="1" fill="#27ae60"/><rect x="6" y="10" width="4" height="10" rx="1" fill="#27ae60"/><rect x="12" y="5" width="4" height="15" rx="1" fill="#27ae60"/><rect x="18" y="0" width="4" height="20" rx="1" fill="#27ae60"/><text x="-38" y="66" text-anchor="middle" font-size="10" fill="#27ae60">≈-42 dBm</text></g><text class="node-kind" text-anchor="middle" y="-56" fill="#7d96ae" font-size="8" letter-spacing="2">CLIENT</text><text class="node-title" text-anchor="middle" y="64" fill="#dceaf5" font-size="14" font-weight="600">Wi-Fi client</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="82" fill="#94acc4" font-size="10">managed USB Wi-Fi 7</text></g>
+<g class="mesh-node client" transform="translate(874.8 699.2)" color="#ccdde9"><circle class="node-halo" r="46" fill="#0b1423" stroke="none" stroke-width="1.5"/><circle class="node-disc" r="35" fill="#252c4a" stroke="#9aa5ff" stroke-width="1.6"/><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="-12" y="-22" width="24" height="44" rx="5"/><path d="M-4 -16H4M-3 16H3"/></g><g transform="translate(38,-16)"><rect x="0" y="15" width="4" height="5" rx="1" fill="#27ae60"/><rect x="6" y="10" width="4" height="10" rx="1" fill="#27ae60"/><rect x="12" y="5" width="4" height="15" rx="1" fill="#27ae60"/><rect x="18" y="0" width="4" height="20" rx="1" fill="#27ae60"/><text x="-38" y="66" text-anchor="middle" font-size="10" fill="#27ae60">≈-49 dBm</text></g><text class="node-kind" text-anchor="middle" y="-56" fill="#7d96ae" font-size="8" letter-spacing="2">CLIENT</text><text class="node-title" text-anchor="middle" y="64" fill="#dceaf5" font-size="14" font-weight="600">iPhone (inferred)</text><text class="node-sub" font-family="ui-monospace, SFMono-Regular, Consolas, Menlo, monospace" text-anchor="middle" y="82" fill="#94acc4" font-size="10">phone</text></g>
+</svg>
+        </div>
+        <div class="mesh-legend"><span class="mesh-wired">— Ethernet</span><span class="mesh-5">∿ 5 GHz</span><span class="mesh-24">∿ 2.4 GHz</span><span class="mesh-6">∿ 6 GHz</span><span class="mesh-member">··· Radio / BSS membership</span></div>
+      </div>
+      <aside class="inspector" aria-label="Selected node">
+        <p class="tag">Selected node · BSS</p>
+        <h3>EasyMesh-Lab</h3>
+        <p class="inspector-sub">6 GHz · 2 clients</p>
+        <dl>
+          <dt>operating channel</dt><dd>Ch 69 · 160 MHz</dd>
+          <dt>channel evidence</dt><dd>Managed USB client: <code>iw dev wlan0 info</code> + associated BSSID</dd>
+          <dt>channel note</dt><dd>Observed client interface channel and width; not a 1905 Operating Channel Report.</dd>
+          <dt>associated clients</dt><dd>2</dd>
+          <dt>evidence</dt><dd>AP Operational BSS TLV 0x83</dd>
+          <dt>radio capabilities</dt><dd>AP Radio Basic Capabilities TLV 0x85: max BSS, operating classes</dd>
+          <dt>note</dt><dd>Agent-reported BSS; wired reports do not verify over-the-air beacon visibility.</dd>
+        </dl>
+      </aside>
+      <figcaption id="topo-caption">The Topology view, redrawn from the lab on 2026-09-28 with the panel's own
+      spring layout, glyphs and colours; addresses are replaced with descriptions. In the panel, nodes drag, the
+      view pans and zooms, and selecting a node shows the evidence behind it. Here that is the 6 GHz BSS: its
+      channel comes from a managed USB client, and for the 5 and 2.4 GHz BSSes, with no Operating Channel Report
+      received, the panel says so instead of guessing.</figcaption>
+    </figure>
+  </section>
+
+  <section id="findings">
+    <h2>What the extender showed</h2>
+    <p class="section-lead">Observations from one device and firmware, not claims about every EasyMesh agent.
+    Device identities, credentials and raw captures stay out of the public repository.</p>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Experiment</th><th>Observed</th></tr></thead>
+      <tbody>
+        <tr><td>2.4 and 5 GHz onboarding</td><td>The agent's M1, the controller's encrypted M2, then the expected SSID in the operational BSS reports</td></tr>
+        <tr><td>SSID change</td><td>A renew, a fresh M1/M2, and the new SSID confirmed by topology</td></tr>
+        <tr><td>6 GHz from the controller</td><td>The radio advertises 6 GHz operating classes, but no 6 GHz M1 arrived, also with an experimental Profile 2 persona. Controller-provisioned 6 GHz is not verified</td></tr>
+        <tr><td>6 GHz clients</td><td>With onboarding responses paused, a manually enabled 6 GHz BSS held; a Mac laptop joined it, and the managed USB clients join it with WPA3-SAE and PMF</td></tr>
+        <tr><td>Client signal</td><td>Associated STA Link Metrics give the AP's receive power (RCPI) for each client; no noise, so no SNR</td></tr>
+        <tr><td>Periodic discovery</td><td>The Ethernet link and associations dropped after a discovery exchange; the running lab suppresses periodic announcements for the known agent (a diagnostic setting, not a fix)</td></tr>
+        <tr><td>Guest against host</td><td>The same USB Wi-Fi client on 6 GHz / 160 MHz measured about 74/65 Mbps inside the VM against 739/446 Mbps on the host: USB passthrough is the open question</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section id="state">
+    <h2>Current state</h2>
+    <ul class="facts">
+      <li><b>Where:</b> a fresh LXD VM, <code>easymesh-lab</code>, on rev120, the host the extender's USB Ethernet adapter and the USB Wi-Fi clients are attached to. Physical tests run there.</li>
+      <li><b>Checked:</b> 34 tests, plus the browser, reboot, capture and 6 GHz / WPA3 checks; the previous VM was backed up and removed.</li>
+      <li><b>Works:</b> discovery, topology, AP capabilities, 2.4/5 GHz WPA2 provisioning and re-onboarding, metrics, the packet timeline and oscilloscope, topology, client history and signal, speed tests, managed WPA3 clients on 6 GHz.</li>
+      <li><b>Not yet:</b> controller-provisioned 6 GHz; more than one agent; DPP, MLO configuration, traffic separation and backhaul configuration; fragmented inbound CMDUs. The optimizer only advises: automatic steering is off and it has no candidate measurements yet.</li>
+    </ul>
+    <p class="note">This is an experimental single-agent lab, not a certified or complete EasyMesh controller. Its
+    Profile 1/2 advertisement is a lab persona, not a claim of conformance.</p>
+  </section>
+
+  <section id="run">
+    <h2>Run it</h2>
+    <h3>Offline, without a device</h3>
+    <p>The unit tests use synthetic identities and a synthetic M1; they send nothing and need no root.
+    The panel starts with no live agent.</p>
+<pre><code>python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m unittest -v test_wsc test_controller test_protocol test_speed test_telemetry test_optimizer
+.venv/bin/python panel_server.py        # http://127.0.0.1:8765</code></pre>
+    <h3>The lab VM</h3>
+    <p>From a clean checkout on any Linux host with LXD VM support, a managed bridge and a storage pool.
+    Nothing host-specific is assumed: the names and addresses are inputs.</p>
+<pre><code>python3 deploy/lxd-vm/build_vm.py \
+  --name mesh-lab --host-ip HOST_LAN_IP --guest-ip UNUSED_VM_IP \
+  --network MANAGEMENT_BRIDGE --pool STORAGE_POOL \
+  --lab-mac ADAPTER_MAC --target AGENT_AL_MAC \
+  --allow-client BROWSER_IP</code></pre>
+    <p>The build never attaches hardware: the USB Ethernet adapter (by vendor, product and serial) and the
+    enrolled Wi-Fi clients are handed over explicitly, and onboarding starts paused. The
+    <a href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/deploy/lxd-vm/README.md">deployment guide</a>
+    covers the handover, the endpoints, validation and rollback.</p>
+  </section>
+
+  <section id="docs">
+    <h2>Documentation</h2>
+    <div class="doc-grid">
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/deploy/lxd-vm/README.md"><b>LXD VM deployment</b><span>Build from a clean checkout, USB ownership, services, isolation, rollback</span></a>
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/docs/SETUP.md"><b>Physical setup</b><span>Interfaces, credentials, the lab namespace, moving to another host</span></a>
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/docs/WORKBENCH.md"><b>Teaching panel</b><span>Views, pause controls, recorded sessions, speed measurements</span></a>
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/docs/LEARNING-LAB.md"><b>Experiments and the oscilloscope</b><span>Supervised steering, client history, guided protocol learning, 6 GHz diagnostics</span></a>
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/docs/USB-WIFI-CLIENTS.md"><b>Managed USB Wi-Fi clients</b><span>Namespaces, enrolment, iperf3, 6 GHz WPA3</span></a>
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/docs/TELEMETRY.md"><b>Client telemetry</b><span>RCPI, signal bars, passive device hints and their limits</span></a>
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/docs/OPTIMIZER.md"><b>Controller-side optimizer</b><span>The advisory policy and its execution boundary</span></a>
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/docs/EXPERIMENTS.md"><b>RE653BE experiments</b><span>The observations above, in full</span></a>
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/docs/USB-PERFORMANCE.md"><b>USB performance findings</b><span>Discovery-related drops, guest against host throughput</span></a>
+      <a class="doc" href="https://github.com/boardfarmdevs/easymesh-lab/blob/main/docs/REFERENCES.md"><b>References and provenance</b><span>The protocol sources used, and what is not included</span></a>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <p>Part of the <a href="https://boardfarmdevs.github.io/easymesh-labs/">boardfarmdevs EasyMesh labs</a> ·
+  <a href="https://github.com/boardfarmdevs/easymesh-lab">boardfarmdevs/easymesh-lab</a> · No license has been selected yet.</p>
+</footer>
+</body>
+</html>

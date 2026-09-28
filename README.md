@@ -1,5 +1,13 @@
 # EasyMesh Protocol Lab
 
+<!-- labs block: the same in the five lab repositories -->
+**Site:** <https://boardfarmdevs.github.io/easymesh-lab/>. Part of the boardfarmdevs labs, which serve three
+goals: the EasyMesh optimizer ([RDK EasyMesh](https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/),
+[prplMesh](https://boardfarmdevs.github.io/prplmesh-lab/)), the OpenSync adapter
+([EMOSA](https://boardfarmdevs.github.io/emosa-lab/), [OpenSync](https://boardfarmdevs.github.io/opensync-lab/))
+and EasyMesh on physical hardware ([Protocol lab](https://boardfarmdevs.github.io/easymesh-lab/)),
+on the way to one EasyMesh system on wmediumd with native agents and OpenSync pods together.
+
 A Python IEEE 1905.1 / EasyMesh controller with a browser teaching panel. Inspect packets and TLVs, follow message IDs, draw topology, send protocol commands, and compare requested configuration with what an agent actually reports.
 
 This is an experimental **single-agent** lab, not a certified or complete EasyMesh controller. It uses Python for the protocol and services, and vanilla JavaScript/HTML/CSS for the panel. Linux raw sockets require root for live operation; offline tests and the panel do not.
