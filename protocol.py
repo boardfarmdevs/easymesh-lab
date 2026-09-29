@@ -53,6 +53,12 @@ def decode_value(t,b):
             out['links'].append(x)
         return out
     if t==0x0b:return {'oui':r.take(3).hex(':'),'vendor_payload':r.take(r.left()).hex(),'interpretation':'Vendor-specific; not inferred from bytes.'}
+    if t==0x12:
+        out={'media':[]}
+        for _ in range(r.u8()):out['media'].append({'media_type':f'0x{r.u16():04x}','media_info':r.take(r.u8()).hex()})
+        out['note']='Media types on which the sender saw the button press; none means it was pressed on another interface or remotely.'
+        return out
+    if t==0x13:return {'event_sender_al':r.mac(),'event_mid':r.u16(),'local_interface':r.mac(),'new_interface':r.mac(),'note':'The new device interface (for example a backhaul STA), not its AL MAC.'}
     if t==0x11:
         out=[]
         while r.left():
@@ -161,8 +167,12 @@ BSS=field('bssid','Source BSSID','bssid')
 RADIO=field('radio','Radio ID','radio')
 OP=field('opclass','Operating class','number',81)
 CH=field('channel','Channel','number',6)
+AGENT=field('agent','Agent AL MAC (blank = primary)','optional_mac',help='An admitted agent; blank addresses the primary agent.')
+# Commands for one agent's own state; onboarding and local settings apply lab-wide.
+LAB_WIDE={'reonboard','set_ssid','enable_6ghz','polling','push_button','admit_agent'}
 CATALOG=[]
 def recipe(id,title,group,kind,description,fields=[],effect='Query',expected=''):
+    if id not in LAB_WIDE:fields=[*fields,AGENT]
     CATALOG.append(dict(id=id,title=title,group=group,kind=kind,description=description,fields=fields,effect=effect,expected=expected or ', '.join(MESSAGE_NAMES.get(x,hex(x)) for x in EXPECT.get(kind,[])) or 'No direct response defined'))
 recipe('topology','Discover topology','Discover',2,'Ask for interfaces, neighbors, operational BSSs and associated clients.')
 recipe('capabilities','Read AP capabilities','Discover',0x8001,'Learn radio operating classes and HT/VHT/HE capabilities.')
@@ -186,6 +196,8 @@ recipe('unblock','Allow association','Steering',0x8016,'Remove an association bl
 recipe('backhaul_steer','Steer wireless backhaul','Steering',0x8019,'Request a wireless backhaul station move. Our current uplink is Ethernet; this may be inapplicable.',[field('station','Backhaul STA MAC','mac'),field('target_bssid','Target BSSID','mac'),OP,CH],'May interrupt backhaul')
 recipe('enable_6ghz','Enable 6 GHz / WPA3','Onboarding',0x0a,'Enable the experimental 6 GHz WSC path and Profile 2 lab persona. Send renew for 2.4/5/6 GHz; use WPA3-SAE on 6 GHz and retain WPA2 on existing bands. Requires agent support and a Wi-Fi 6E/7 client.',[],'May interrupt Wi-Fi','Fresh 6 GHz M1 → SAE M2 → 6 GHz operational BSS; client association separately verifies RF/security')
 recipe('reonboard','Re-onboard current SSID','Onboarding',0x0a,'Send renew for configured bands, then watch fresh M1 and encrypted M2 exchanges. Does not factory-reset the extender.',[],'May interrupt Wi-Fi','Fresh M1 → M2 → topology containing the configured SSID')
+recipe('push_button','Start push-button onboarding','Onboarding',0x0b,'Send a 1905 Push Button Event Notification as relayed multicast. Agents open WPS push-button on BSSs that accept backhaul STAs, for about two minutes; then press WPS on the new extender. Requires backhaul_bands in the controller config and resumed onboarding.',[],'Opens WPS on the agents','Push Button Join Notification from the agent the new device joined; then the new agent’s autoconfiguration search')
+recipe('admit_agent','Admit an agent','Onboarding',None,'Add an AL MAC to the agents the controller answers. Unknown agents are listed as pending and never answered until admitted.',[field('agent','Agent AL MAC','mac',help='Copy it from the pending agents list.')],'Local controller setting','The agent’s next autoconfiguration search is answered')
 recipe('set_ssid','Set SSID & re-onboard','Onboarding',0x0a,'Apply a new SSID through WSC: WPA2 on 2.4/5 GHz, SAE on 6 GHz when enabled. Blank password preserves the current key.',[field('ssid','SSID','text','EasyMesh-Lab'),field('password','New password (optional)','password')],'Changes Wi-Fi credentials','New SSID in AP Operational BSS reports')
 recipe('polling','Automatic query mode','Learning',None,'Pause or resume the controller’s periodic topology/capability queries. Automatic responses and topology announcements continue.',[field('enabled','Enable automatic queries','select','true')],'Local controller setting','Controller state updated')
 recipe('raw','Compose a CMDU','Advanced',None,'Build an untagged, single-fragment CMDU addressed only to this lab agent. Add TLVs as JSON: [{"type":"0x95","hex":"..."}]. EOM is appended. This is encoding access, not an implementation of every protocol state machine.',[field('message_type','Message type (hex)','text','0x0002'),field('tlvs','TLV list (JSON)','textarea','[]')],'Depends on message type')
@@ -207,7 +219,15 @@ def build_command(name,p,state):
     if name not in LOOKUP:raise ValueError('Unknown command')
     if not isinstance(p,dict):raise ValueError('Parameters must be an object')
     kind=LOOKUP[name]['kind'];body=b''
+    if p.get('agent'):mac(p,'agent')
     if name in ('reonboard','set_ssid','enable_6ghz','polling'):return []
+    if name=='admit_agent':
+        if not p.get('agent'):raise ValueError('agent: enter a six-byte MAC address')
+        return []
+    if name=='push_button':
+        if not state.get('controller'):raise ValueError('Controller AL MAC is not known yet')
+        # AL MAC TLV plus an event TLV listing no media: the press is remote.
+        return [(kind,tlv(1,macbytes(state['controller']))+tlv(0x12,b'\x00'))]
     if name=='link_metrics':body=tlv(8,b'\x00\x02')
     elif name=='ap_metrics':
         target=mac(p,'bssid',True)

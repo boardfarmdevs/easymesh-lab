@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Single-agent Python EasyMesh lab controller: discovery, WSC, topology and renew."""
+"""Python EasyMesh lab controller: discovery, WSC, topology and renew.
+
+One primary agent (--target, the wired extender) plus optional admitted agents
+(config "agents"), for example an extender on a wireless backhaul behind it.
+"""
 import argparse
 import hashlib
 import fcntl
@@ -13,7 +17,7 @@ import struct
 import time
 import uuid
 from responder import parse, response, tlv, macbytes, macstr, log, MULTICAST
-from wsc import build_m2, inspect_m1, validate_config
+from wsc import build_m2s, inspect_m1, validate_config
 from workbench import Workbench
 from protocol import decode_value
 
@@ -28,6 +32,8 @@ def save(path,value):
 
 def frame(src,dst,kind,mid,body=b'',flags=0x80):
     return (macbytes(dst)+macbytes(src)+b'\x89\x3a'+struct.pack('!BBHHBB',0,0,kind,mid,0,flags)+body+tlv(0,b'')).ljust(60,b'\0')
+
+PENDING_LIMIT=16
 
 def operational_bss(value):
     pos=1; result=[]
@@ -55,40 +61,67 @@ class Controller:
             if old.get('target')==args.target:
                 self.state['radios']=old.get('radios',{})
                 if old.get('onboarding_evidence'):self.state['onboarding_evidence']=old['onboarding_evidence']
+                if old.get('agents'):self.state['agents']=old['agents']
         self.cache={}; self.last_response={}; self.next_query=0; self.next_discovery=0; self.next_client_metrics=0; self.client_poll_cursor=0
         self.mid=secrets.randbelow(65536); self.running=True; self.known=False
         self.sock=socket.socket(socket.AF_PACKET,socket.SOCK_RAW,socket.htons(0x893a))
         self.sock.bind((args.interface,0)); self.sock.settimeout(1)
         self.sock.setsockopt(263,1,struct.pack('IHH8s',socket.if_nametoindex(args.interface),0,6,macbytes(MULTICAST)))
         self.workbench=Workbench(self)
-    def send(self,kind,body=b'',mid=None,dst=None):
+    def secondary_agents(self):
+        """Admitted agents besides the primary target, in config order."""
+        target=getattr(getattr(self,'args',None),'target',None)
+        return [a for a in dict.fromkeys(getattr(self,'config',{}).get('agents',[])) if a!=target]
+    def agents(self):
+        return [self.args.target,*self.secondary_agents()]
+    def seen_secondary_agents(self):
+        seen=self.state.get('agents',{})
+        return [a for a in self.secondary_agents() if seen.get(a,{}).get('last_seen')]
+    def agent(self,al):
+        return self.state.setdefault('agents',{}).setdefault(al,{'status':'waiting_for_agent','operational_bss':[]})
+    def note_pending(self,m):
+        """Record an unadmitted 1905 device; it is never answered. True when new."""
+        al=macstr(m['tlvs'][1][0]) if len(m['tlvs'].get(1,[]))==1 and len(m['tlvs'][1][0])==6 else None
+        if al in self.agents():return False  # an admitted agent sending from an interface address
+        pending=self.state.setdefault('pending_agents',{})
+        new=m['src'] not in pending
+        if new and len(pending)>=PENDING_LIMIT:return False
+        entry=pending.setdefault(m['src'],{'first_seen':time.time(),'messages':{}})
+        entry['last_seen']=time.time();kind=f"0x{m['kind']:04x}"
+        entry['messages'][kind]=entry['messages'].get(kind,0)+1
+        if al:entry['al_mac']=al
+        return new
+    def send(self,kind,body=b'',mid=None,dst=None,flags=0x80):
         if kind in (8,9,10) and ONBOARDING_PAUSE.exists():
-            log('onboarding_tx_suppressed',kind=f'0x{kind:04x}'); return
+            log('onboarding_tx_suppressed',kind=f'0x{kind:04x}'); return None
         if mid is None:self.mid=(self.mid+1)&65535; mid=self.mid
-        raw=frame(self.args.controller,dst or self.args.target,kind,mid,body)
+        raw=frame(self.args.controller,dst or self.args.target,kind,mid,body,flags)
         self.sock.send(raw)
         if hasattr(self,'workbench'):self.workbench.packet('TX',raw)
-        log('tx',kind=f'0x{kind:04x}',mid=mid,bytes=len(raw))
+        log('tx',kind=f'0x{kind:04x}',mid=mid,bytes=len(raw),dst=dst or self.args.target)
+        return mid
     def checkpoint(self):
         self.state['onboarding_paused']=ONBOARDING_PAUSE.exists()
         self.state['desired_ssid']=self.config['ssid']; self.state['updated_at']=time.time()
         self.state['enable_6ghz']=self.config.get('enable_6ghz',False)
         self.state['profile']=self.config.get('controller_profile',1)
         self.state['interface']=self.args.interface
+        self.state['admitted_agents']=self.secondary_agents()
         save(self.args.state,self.state)
         os.chown(self.args.state, -1, self.args.config.stat().st_gid)
         os.chmod(self.args.state, 0o640)
-    def topology(self,mid):
+    def topology(self,mid,dst=None):
         mac=macbytes(self.args.controller)
         # Device Info: AL MAC, one Ethernet interface, IEEE 802.3ab gigabit media 0x0001.
+        # Our only direct 1905 neighbor is the primary agent, whoever asks.
         info=mac+b'\x01'+mac+b'\x00\x01\x00'
-        self.send(3,tlv(3,info)+tlv(4,b'\x00')+tlv(7,mac+macbytes(self.args.target)+b'\x00')+tlv(0x80,b'\x01\x00')+tlv(0xb3,bytes([self.config.get('controller_profile',1)])),mid)
-    def link_metrics(self,mid,query):
+        self.send(3,tlv(3,info)+tlv(4,b'\x00')+tlv(7,mac+macbytes(self.args.target)+b'\x00')+tlv(0x80,b'\x01\x00')+tlv(0xb3,bytes([self.config.get('controller_profile',1)])),mid,dst=dst)
+    def link_metrics(self,mid,query,dst=None):
         if not query or query[0] not in (0,1):raise ValueError('invalid metric query')
         expected=2 if query[0]==0 else 8
         if len(query)!=expected:raise ValueError('invalid metric query length')
         if query[0]==1 and query[1:7]!=macbytes(self.args.target):
-            self.send(6,tlv(0x0c,b'\x00'),mid); return
+            self.send(6,tlv(0x0c,b'\x00'),mid,dst=dst); return
         direction=query[-1]
         if direction not in (0,1,2):raise ValueError('invalid metric direction')
         root=Path('/sys/class/net')/self.args.interface
@@ -103,35 +136,39 @@ class Controller:
             body+=tlv(9,prefix+interfaces+struct.pack('!BIIHHH',0,counter('tx_errors'),counter('tx_packets'),0,0,rate))
         if direction in (1,2):
             body+=tlv(10,prefix+interfaces+struct.pack('!IIB',counter('rx_errors'),counter('rx_packets'),255))
-        self.send(6,body,mid)
+        self.send(6,body,mid,dst=dst)
 
     def handle(self,raw):
         try:m=parse(raw)
         except ValueError:
             if hasattr(self,'workbench'):self.workbench.packet('unknown',raw)
             raise
-        if not m or m['src']!=self.args.target or m['dst'] not in (MULTICAST,self.args.controller):
-            if m and m['src']!=self.args.controller and hasattr(self,'workbench'):
-                self.workbench.packet('unknown',raw)
+        if not m or m['dst'] not in (MULTICAST,self.args.controller) or m['src'] not in self.agents():
+            if m and m['src']!=self.args.controller:
+                if m['dst'] in (MULTICAST,self.args.controller) and m['src'] not in self.agents() and self.note_pending(m):
+                    self.checkpoint()
+                if hasattr(self,'workbench'):self.workbench.packet('unknown',raw)
             return
+        peer=m['src'];primary=peer==self.args.target
         self.known=True; v=m['tlvs']; kind=m['kind']
+        if not primary:self.agent(peer)['last_seen']=time.time()
         if hasattr(self,'workbench'):self.workbench.packet('RX',raw)
-        log('rx',kind=f'0x{kind:04x}',mid=m['mid'],tlvs={f'0x{k:02x}':[x.hex() for x in vals] for k,vals in v.items()})
+        log('rx',kind=f'0x{kind:04x}',mid=m['mid'],src=peer,tlvs={f'0x{k:02x}':[x.hex() for x in vals] for k,vals in v.items()})
         if kind in (7,9) and ONBOARDING_PAUSE.exists():
             log('onboarding_paused',kind=f'0x{kind:04x}',mid=m['mid'])
             self.checkpoint(); return
         if kind==7:
-            out=response(raw,self.args.controller,self.args.target,self.config.get('enable_6ghz',False),self.config.get('controller_profile',1))
+            out=response(raw,self.args.controller,peer,self.config.get('enable_6ghz',False),self.config.get('controller_profile',1))
             if out:
                 band=v[14][0][0]; now=time.monotonic()
-                if now-self.last_response.get(band,-100)>=1:
-                    self.sock.send(out); self.last_response[band]=now
+                if now-self.last_response.get((peer,band),-100)>=1:
+                    self.sock.send(out); self.last_response[(peer,band)]=now
                     if hasattr(self,'workbench'):self.workbench.packet('TX',out)
-                    log('autoconfig_response',band=band,mid=m['mid'])
-        elif kind==2:self.topology(m['mid'])
+                    log('autoconfig_response',band=band,mid=m['mid'],dst=peer)
+        elif kind==2:self.topology(m['mid'],dst=peer)
         elif kind==5:
             if len(v.get(8,[]))!=1:raise ValueError('missing metric query TLV')
-            self.link_metrics(m['mid'],v[8][0])
+            self.link_metrics(m['mid'],v[8][0],dst=peer)
         elif kind==9:
             if len(v.get(0x11,[]))!=1:raise ValueError('expected one WSC M1')
             m1=v[0x11][0]; a=inspect_m1(m1)
@@ -144,26 +181,48 @@ class Controller:
                 raise ValueError('6 GHz radio has inconsistent WSC RF band; refusing legacy credentials')
             key=hashlib.sha256(m1+radio+str(self.config['revision']).encode()).hexdigest()
             if key not in self.cache:
-                self.cache[key]=build_m2(m1,self.config,self.uuid)
+                self.cache[key]=build_m2s(m1,self.config,self.uuid)
                 if len(self.cache)>64:self.cache.pop(next(iter(self.cache)))
-            m2=self.cache[key]
-            self.send(9,tlv(0x82,radio)+tlv(0x11,m2))
+            m2s=self.cache[key]
+            # One WSC message carries one M2 per BSS of this radio.
+            self.send(9,tlv(0x82,radio)+b''.join(tlv(0x11,m2) for m2 in m2s),dst=peer)
+            separate=len(m2s)>1
             self.state['radios'][rid]={'rf_bands':a[0x103c][0], 'ssid_sent':self.config['ssid'],
+                'backhaul_ssid_sent':self.config['backhaul_ssid'] if separate else None,
                 'security_sent':'WPA3-SAE' if a[0x103c][0]==8 else 'WPA2-PSK',
                 'revision':self.config['revision'],'m2_sent_at':time.time(),
                 'manufacturer':a.get(0x1021,b'').decode('utf8','replace'),
-                'model':a.get(0x1023,b'').decode('utf8','replace')}
-            self.state['status']='m2_sent_awaiting_operational_bss'; self.next_query=time.monotonic()+5
-            log('m2_sent',radio=rid,ssid=self.config['ssid'],revision=self.config['revision'])
+                'model':a.get(0x1023,b'').decode('utf8','replace'),'agent':peer,
+                'backhaul_bands':self.config.get('backhaul_bands',[])}
+            if primary:self.state['status']='m2_sent_awaiting_operational_bss'
+            else:self.agent(peer)['status']='m2_sent_awaiting_operational_bss'
+            self.next_query=time.monotonic()+5
+            log('m2_sent',radio=rid,agent=peer,ssid=self.config['ssid'],revision=self.config['revision'])
         elif kind==3:
-            if 0x83 in v:
+            # Interfaces (media types) and 1905 neighbors show how each agent is attached.
+            def decoded(t,value):
+                try:return decode_value(t,value)
+                except (ValueError,IndexError,struct.error) as e:return {'decode_error':str(e),'raw':value.hex()}
+            self.state.setdefault('topology',{})[peer]={'time':time.time(),
+                'device':decoded(3,v[3][0]) if len(v.get(3,[]))==1 else None,
+                'neighbors':[decoded(7,x) for x in v.get(7,[])]}
+            if 0x83 in v and not primary:
+                bss=[]
+                for value in v[0x83]:bss.extend(operational_bss(value))
+                agent=self.agent(peer);agent['operational_bss']=bss
+                configured={rid for rid,r in self.state['radios'].items() if r.get('agent')==peer}
+                matched={x['radio'] for x in bss if x['ssid']==self.config['ssid']}
+                if configured:agent['status']='ssid_confirmed_in_agent_topology' if configured<=matched else 'm2_sent_awaiting_operational_bss'
+                log('operational_bss',agent=peer,bss=bss,status=agent['status'])
+            elif 0x83 in v:
                 bss=[]
                 for value in v[0x83]:bss.extend(operational_bss(value))
                 self.state['operational_bss']=bss
-                configured=set(self.state['radios'])
+                target=self.args.target
+                configured={rid for rid,r in self.state['radios'].items() if r.get('agent',target)==target}
                 matched={x['radio'] for x in bss if x['ssid']==self.config['ssid']}
-                six_sent={rid for rid,r in self.state['radios'].items() if r.get('rf_bands')==8 and r.get('revision')==self.config['revision']}
-                six_expected={o['fields']['radio'] for o in self.state.get('observations',{}).values() if o.get('type')==0x85 and any(131<=c['class']<=137 for c in o['fields'].get('operating_classes',[]))}
+                six_sent={rid for rid in configured if self.state['radios'][rid].get('rf_bands')==8 and self.state['radios'][rid].get('revision')==self.config['revision']}
+                six_expected={o['fields']['radio'] for o in self.state.get('observations',{}).values() if o.get('type')==0x85 and o.get('agent',target)==target and any(131<=c['class']<=137 for c in o['fields'].get('operating_classes',[]))}
                 six_ok=not self.config.get('enable_6ghz',False) or bool(six_sent and six_sent<=matched and six_expected<=six_sent)
                 self.state['six_ghz_bss_observed']=[x for x in bss if x['radio'] in six_expected or x['radio'] in six_sent]
                 self.state['six_ghz_status']='confirmed_in_agent_topology' if self.config.get('enable_6ghz',False) and six_ok else 'bss_present_not_controller_confirmed' if self.state['six_ghz_bss_observed'] else 'awaiting_6ghz_bss' if self.config.get('enable_6ghz',False) else 'not_requested'
@@ -173,24 +232,37 @@ class Controller:
                     self.state['status']='m2_sent_awaiting_operational_bss'
                 log('operational_bss',bss=bss,status=self.state['status'])
         elif kind==0x8002:
-            self.state['capabilities_received_at']=time.time()
+            if primary:self.state['capabilities_received_at']=time.time()
+            else:self.agent(peer)['capabilities_received_at']=time.time()
         elif kind==1:
             self.next_query=time.monotonic()+1
+        elif kind==0x0c and len(v.get(0x13,[]))==1:
+            join=decode_value(0x13,v[0x13][0]);join.pop('note',None)
+            button=self.state.setdefault('push_button',{})
+            button['joins']=[*button.get('joins',[]),{**join,'reported_by':peer,'time':time.time()}][-8:]
+            log('push_button_join',reported_by=peer,**join)
         self.checkpoint()
     def poll_client_metrics(self):
         report=self.state.get('observations',{}).get('84:all',{})
-        if time.time()-report.get('time',0)>90:return
         stations=sorted({c['station'] for b in report.get('fields',{}).get('bss',[]) for c in b.get('clients',[])})
         # Bound each batch and rotate fairly for larger client sets.
-        if not stations:return
-        start=self.client_poll_cursor%len(stations)
-        for i in range(min(8,len(stations))):
-            self.send(0x800d,tlv(0x95,macbytes(stations[(start+i)%len(stations)])))
-        self.client_poll_cursor=(start+8)%len(stations)
+        if stations and time.time()-report.get('time',0)<=90:
+            start=self.client_poll_cursor%len(stations)
+            for i in range(min(8,len(stations))):
+                self.send(0x800d,tlv(0x95,macbytes(stations[(start+i)%len(stations)])))
+            self.client_poll_cursor=(start+8)%len(stations)
+        # Further agents report under their own key and are asked directly.
+        for al in self.seen_secondary_agents():
+            report=self.state.get('observations',{}).get('84:'+al,{})
+            if time.time()-report.get('time',0)>90:continue
+            for station in sorted({c['station'] for b in report.get('fields',{}).get('bss',[]) for c in b.get('clients',[])})[:8]:
+                self.send(0x800d,tlv(0x95,macbytes(station)),dst=al)
 
     def renew(self):
         for band in ((0,1,3) if self.config.get('enable_6ghz',False) else (0,1)):
-            self.send(0x0a,tlv(1,macbytes(self.args.controller))+tlv(0x0f,b'\x00')+tlv(0x10,bytes([band])))
+            body=tlv(1,macbytes(self.args.controller))+tlv(0x0f,b'\x00')+tlv(0x10,bytes([band]))
+            self.send(0x0a,body)
+            for al in self.seen_secondary_agents():self.send(0x0a,body,dst=al)
     def run(self):
         def stop(*_):self.running=False
         signal.signal(signal.SIGINT,stop); signal.signal(signal.SIGTERM,stop)
@@ -211,7 +283,9 @@ class Controller:
                     mac=macbytes(self.args.controller)
                     self.send(0,tlv(1,mac)+tlv(2,mac),dst=MULTICAST); self.next_discovery=now+getattr(self.args,'discovery_interval',60)
                 if self.workbench.auto_poll and self.known and now>=self.next_query:
-                    self.send(2); self.send(0x8001); self.next_query=now+30
+                    self.send(2); self.send(0x8001)
+                    for al in self.seen_secondary_agents():self.send(2,dst=al);self.send(0x8001,dst=al)
+                    self.next_query=now+30
                 if self.workbench.auto_poll and self.known and now>=self.next_client_metrics:
                     self.poll_client_metrics(); self.next_client_metrics=now+15
                 try:
@@ -223,7 +297,7 @@ class Controller:
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('command',choices=['init','run','set-ssid','status'])
+    p.add_argument('command',choices=['init','run','set-ssid','set-backhaul','status'])
     p.add_argument('--config',type=Path,default=BASE/'config.json')
     p.add_argument('--state',type=Path,default=BASE/'state.json')
     p.add_argument('--interface',default=None)
@@ -231,6 +305,9 @@ def main():
     p.add_argument('--target',default=None)
     p.add_argument('--discovery-interval',type=float,default=60,help='Topology discovery announcement interval in seconds; 0 disables announcements for interoperability diagnosis')
     p.add_argument('--ssid'); p.add_argument('--password-file',type=Path)
+    p.add_argument('--bands',help='set-backhaul: comma-separated bands whose BSS also accepts backhaul STAs ("5", "2.4,5"; empty turns it off)')
+    p.add_argument('--backhaul-ssid',help='set-backhaul: use a separate backhaul BSS with this SSID and a generated password')
+    p.add_argument('--combined',action='store_true',help='set-backhaul: drop the separate backhaul BSS; the fronthaul BSS doubles as backhaul')
     a=p.parse_args()
     if a.command=='init':
         if a.config.exists():raise SystemExit('Config already exists')
@@ -243,6 +320,19 @@ def main():
         c['ssid']=a.ssid
         if a.password_file:c['password']=a.password_file.read_text().rstrip('\n')
         validate_config(c); c['revision']+=1; save(a.config,c); print('Config updated; running controller will renew onboarding')
+    elif a.command=='set-backhaul':
+        if a.bands is None:raise SystemExit('--bands required (use --bands "" to turn backhaul off)')
+        c=json.loads(a.config.read_text())
+        c['backhaul_bands']=[b.strip() for b in a.bands.split(',') if b.strip()]
+        if a.combined:
+            c.pop('backhaul_ssid',None);c.pop('backhaul_password',None)
+        elif a.backhaul_ssid:
+            if c.get('backhaul_ssid')!=a.backhaul_ssid or 'backhaul_password' not in c:
+                c['backhaul_password']=secrets.token_urlsafe(24)
+            c['backhaul_ssid']=a.backhaul_ssid
+        validate_config(c); c['revision']+=1; save(a.config,c)
+        style=f'separate backhaul BSS "{c["backhaul_ssid"]}"' if 'backhaul_ssid' in c else 'fronthaul BSS doubles as backhaul'
+        print(f'Backhaul bands {c["backhaul_bands"] or "off"} ({style}); running controller will renew onboarding (not while onboarding is paused)')
     elif a.command=='status':print(a.state.read_text())
     else:
         if not a.interface or not a.target:raise SystemExit('run requires --interface and --target (agent AL MAC)')

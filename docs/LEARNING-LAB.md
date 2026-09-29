@@ -1,4 +1,4 @@
-# Single-extender experiments and packet timing
+# Extender experiments and packet timing
 
 The Live wire page includes an oscilloscope-style 1905.1 timing view. The Experiments page follows a five-step workflow: supervised steering, client history, guided protocol queries, optimizer observation, and 6 GHz diagnostics. Python owns packet handling, evidence and services; the browser renders the interactive views.
 

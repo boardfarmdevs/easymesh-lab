@@ -4,7 +4,8 @@ import os
 from pathlib import Path
 import time
 import uuid
-from protocol import build_command, decode_packet, EXPECT, LOOKUP
+from protocol import build_command, decode_packet, EXPECT, LAB_WIDE, LOOKUP
+from responder import MULTICAST
 from wsc import validate_config
 from experiments import SteeringTracker, validate_steering, observe_onboarding
 from client_telemetry import client_views
@@ -60,19 +61,22 @@ class Workbench:
         command=self.command_id
         if direction=='RX':
             key=decoded['mid'];p=self.pending.get(key)
-            if p and decoded['kind'] in p['expected'] and decoded['src']==self.c.args.target:
+            primary=decoded['src']==self.c.args.target
+            if p and decoded['kind'] in p['expected'] and decoded['src']==p.get('agent',self.c.args.target):
                 command=p['id'];ack=decoded['kind']==0x8000
                 self.result(command,status='acknowledged' if ack else 'response_received',response_type=decoded['kind'],response_mid=key,
                             note='Receipt only; inspect result TLVs to determine acceptance or outcome.')
                 if not ack:self.pending.pop(key,None)
-            self.c.state['last_agent_at']=time.time()
+            if primary:self.c.state['last_agent_at']=time.time()
             latest=self.c.state.setdefault('observations',{})
             for t in decoded['tlvs']:
                 if t['type'] in (0x83,0x84,0x85,0x8b,0x8e,0x8f,0x94,0x96,0x98,0x9c,0xa2,0xa3,0x9f,0xa7):
                     f=t['fields'];identity=f.get('radio',f.get('bssid',f.get('station','all')))
-                    latest[f"{t['type']:02x}:{identity}"]={'type':t['type'],'fields':f,'time':time.time()}
+                    # Whole-agent reports (0x83, 0x84) of further agents keep their own key.
+                    if identity=='all' and not primary:identity=decoded['src']
+                    latest[f"{t['type']:02x}:{identity}"]={'type':t['type'],'fields':f,'time':time.time(),'agent':decoded['src']}
         elif command:
-            self.pending[decoded['mid']]={'id':command,'expected':EXPECT.get(decoded['kind'],[]),'time':time.time()}
+            self.pending[decoded['mid']]={'id':command,'expected':EXPECT.get(decoded['kind'],[]),'time':time.time(),'agent':decoded['dst']}
             path=BASE/'results'/f'{command}.json';old=json.loads(path.read_text())
             mids=old.get('mids',[])+[decoded['mid']]
             self.result(command,status='sent',mids=mids)
@@ -115,8 +119,29 @@ class Workbench:
                 self.result(id,name=name,status='processing',title=LOOKUP[name]['title'])
                 if name in ('set_ssid','reonboard','enable_6ghz') and (BASE/'onboarding.paused').exists():
                     raise ValueError('Onboarding is paused to preserve the manual 6 GHz BSS; resume it deliberately before reconfiguration.')
+                if name=='push_button' and (BASE/'onboarding.paused').exists():
+                    raise ValueError('Onboarding is paused: a new extender would join the backhaul but its credential request would go unanswered. Resume onboarding first.')
+                if name=='push_button' and not self.c.config.get('backhaul_bands'):
+                    raise ValueError('No backhaul BSS is configured: set backhaul_bands in the controller config and re-onboard the primary agent first.')
+                dst=None
+                if params.get('agent') and name not in LAB_WIDE:
+                    dst=str(params['agent']).strip().lower()
+                    if dst not in self.c.agents():raise ValueError('agent: not an admitted agent')
                 self.command_id=id
-                if name in ('set_ssid','reonboard','enable_6ghz'):
+                if name=='admit_agent':
+                    agent=str(params.get('agent','')).strip().lower()
+                    if agent==self.c.args.target:raise ValueError('agent: this is already the primary agent')
+                    config=dict(self.c.config);config['agents']=sorted({*config.get('agents',[]),agent})
+                    validate_config(config)
+                    owner=self.c.args.config.stat();atomic(self.c.args.config,config,owner.st_gid,owner.st_uid)
+                    self.c.config=config;self.c.state.get('pending_agents',{}).pop(agent,None);self.c.checkpoint()
+                    self.result(id,status='applied',note='Admitted. Its next autoconfiguration search is answered while onboarding is resumed.')
+                elif name=='push_button':
+                    kind,body=build_command(name,params,self.c.state)[0]
+                    mid=self.c.send(kind,body,dst=MULTICAST,flags=0xc0)
+                    self.c.state['push_button']={'sent_at':time.time(),'mid':mid,'joins':[]};self.c.checkpoint()
+                    self.result(id,status='sent',note='Press WPS on the new extender within about two minutes; watch for a Push Button Join Notification.')
+                elif name in ('set_ssid','reonboard','enable_6ghz'):
                     config=dict(self.c.config)
                     if name=='enable_6ghz':config.update(enable_6ghz=True,controller_profile=2)
                     if name=='set_ssid':
@@ -132,8 +157,12 @@ class Workbench:
                     if str(params.get('enabled')) not in ('true','false'):raise ValueError('enabled must be true or false')
                     self.auto_poll=params['enabled']=='true';self.result(id,status='applied',note='Automatic queries '+('enabled' if self.auto_poll else 'paused'))
                 else:
-                    if name=='steer':validate_steering(params,self.c.state,time.time())
-                    for kind,body in build_command(name,params,self.c.state):self.c.send(kind,body)
+                    view=self.c.state
+                    if dst and dst!=self.c.args.target:
+                        # A further agent's own BSSs, e.g. for "all observed BSSs".
+                        view={**view,'operational_bss':view.get('agents',{}).get(dst,{}).get('operational_bss',[])}
+                    if name=='steer':validate_steering(params,view,time.time())
+                    for kind,body in build_command(name,params,view):self.c.send(kind,body,dst=dst)
                 self.emit('command',command_id=id,name=name,title=LOOKUP[name]['title'])
             except (ValueError,KeyError,TypeError,OSError) as e:
                 self.result(id,status='error',error=str(e));self.emit('command_error',command_id=id,error=str(e))

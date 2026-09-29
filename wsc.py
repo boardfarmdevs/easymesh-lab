@@ -3,6 +3,7 @@ Reference: prplMesh-old/src/al_wsc.c; interoperable wire format, Python implemen
 """
 import hashlib
 import hmac
+import re
 import secrets
 import struct
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -42,17 +43,55 @@ def derive(shared, enonce, mac, rnonce):
     keys = b''.join(hm(kdk, struct.pack('!I', i) + label + struct.pack('!I', 640)) for i in range(1,4))[:80]
     return keys[:32], keys[32:48]
 
+# WSC RF band bits of the bands whose fronthaul BSS may also serve backhaul STAs.
+BACKHAUL_BANDS = {'2.4': 1, '5': 2}
+# Multi-AP Extension subelement bits (WFA vendor extension, subelement 0x06).
+FRONTHAUL_BSS, BACKHAUL_BSS = 0x20, 0x40
+
 def validate_config(config):
     if not isinstance(config.get('enable_6ghz',False),bool):
         raise ValueError('enable_6ghz must be a boolean')
+    bands = config.get('backhaul_bands', [])
+    if not isinstance(bands, list) or any(b not in BACKHAUL_BANDS for b in bands):
+        raise ValueError('backhaul_bands must list "2.4" and/or "5"')
+    agents = config.get('agents', [])
+    if not isinstance(agents, list) or any(not isinstance(a, str) or not re.fullmatch(r'(?:[0-9a-f]{2}:){5}[0-9a-f]{2}', a) for a in agents):
+        raise ValueError('agents must be a list of lower-case AL MAC addresses')
     if type(config.get('controller_profile',1)) is not int or config.get('controller_profile',1) not in (1,2):
         raise ValueError('controller_profile must be 1 or 2')
-    ssid = config['ssid'].encode('utf-8'); password = config['password'].encode('ascii')
+    ssid, password = credentials(config['ssid'], config['password'])
+    if ('backhaul_ssid' in config) != ('backhaul_password' in config):
+        raise ValueError('backhaul_ssid and backhaul_password go together')
+    if 'backhaul_ssid' in config:
+        backhaul, _ = credentials(config['backhaul_ssid'], config['backhaul_password'])
+        if backhaul == ssid:
+            raise ValueError('The backhaul SSID must differ from the fronthaul SSID')
+    return ssid, password
+
+def credentials(ssid, password):
+    ssid = ssid.encode('utf-8'); password = password.encode('ascii')
     if not 1 <= len(ssid) <= 32:
         raise ValueError('SSID must be 1..32 UTF-8 bytes')
     if not 8 <= len(password) <= 63 or any(x < 32 or x > 126 for x in password):
         raise ValueError('Password must be 8..63 printable ASCII characters')
     return ssid, password
+
+def bss_settings(config, rf):
+    """(SSID, password, Multi-AP bits) of each BSS a radio in WSC RF band rf gets.
+
+    Every radio gets the fronthaul BSS. On backhaul_bands (never 6 GHz) it either
+    doubles as backhaul BSS (0x60), or, with backhaul_ssid/backhaul_password, a
+    separate backhaul BSS (0x40) is added, so a backhaul STA cannot join the
+    fronthaul BSS by mistake.
+    """
+    fronthaul = credentials(config['ssid'], config['password'])
+    backhaul = rf != 8 and rf & sum(BACKHAUL_BANDS[b] for b in config.get('backhaul_bands', []))
+    if not backhaul:
+        return [(*fronthaul, FRONTHAUL_BSS)]
+    if 'backhaul_ssid' in config:
+        return [(*fronthaul, FRONTHAUL_BSS),
+                (*credentials(config['backhaul_ssid'], config['backhaul_password']), BACKHAUL_BSS)]
+    return [(*fronthaul, FRONTHAUL_BSS | BACKHAUL_BSS)]
 
 def inspect_m1(data):
     a = attrs(data)
@@ -66,9 +105,15 @@ def inspect_m1(data):
         raise ValueError('invalid DH public key')
     return a
 
-def build_m2(m1, config, registrar_uuid):
-    ssid, password = validate_config(config); a = inspect_m1(m1)
+def build_m2s(m1, config, registrar_uuid):
+    """One M2 per BSS for this radio, each with its own registrar keys."""
+    rf = inspect_m1(m1)[0x103c][0]
+    return [build_m2(m1, config, registrar_uuid, bss) for bss in bss_settings(config, rf)]
+
+def build_m2(m1, config, registrar_uuid, bss=None):
+    validate_config(config); a = inspect_m1(m1)
     rf=a[0x103c][0]
+    ssid, password, multi_ap = bss or bss_settings(config, rf)[0]
     if rf==8:
         if not config.get('enable_6ghz',False):raise ValueError('6 GHz provisioning is disabled')
         authentication=0x40  # WSC SAE / WPA3-Personal, AKM suite 8.
@@ -88,10 +133,9 @@ def build_m2(m1, config, registrar_uuid):
               (0x1011,b'Python EasyMesh Lab'),(0x103c,a[0x103c]),(0x1002,b'\x00\x01'),
               (0x1009,b'\x00\x00'),(0x1012,b'\x00\x04'),(0x102d,b'\x80\x00\x00\x01'),
               (0x1049,bytes.fromhex('00372a000120'))]
-    # Multi-AP fronthaul bit 0x20; wired backhaul, no wireless backhaul BSS.
     plain = b''.join(attr(t,b) for t,b in [(0x1045,ssid),(0x1003,auth_bytes),
                    (0x100f,b'\x00\x08'),(0x1027,password),(0x1020,a[0x1020]),
-                   (0x1049,bytes.fromhex('00372a000120060120'))])
+                   (0x1049,bytes.fromhex('00372a000120')+bytes([6,1,multi_ap]))])
     plain += attr(0x101e,hm(auth,plain)[:8])
     pad = 16-len(plain)%16; plain += bytes([pad])*pad; iv=secrets.token_bytes(16)
     enc=Cipher(algorithms.AES(wrap),modes.CBC(iv)).encryptor()

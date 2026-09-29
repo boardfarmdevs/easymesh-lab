@@ -22,7 +22,8 @@ function meshChannel(id,obs){
  return {label,channels,stale,reported_at:report?new Date(report.time*1000).toLocaleString():null,evidence:report?'Operating Channel Report TLV 0x8f':'No Operating Channel Report received',note:'Radio operating width, not negotiated client width. Channel numbers are retained as reported; wide-channel operating classes may identify a center channel.'};
 }
 function meshModel(){
- const obs=Object.values(state.observations||{}),br=obs.find(x=>x.type===0x83),cr=obs.filter(x=>x.type===0x84).sort((a,b)=>b.time-a.time)[0];
+ const obs=Object.values(state.observations||{}),primary=x=>!x.agent||x.agent===state.target;
+ const br=obs.find(x=>x.type===0x83&&primary(x)),cr=obs.filter(x=>x.type===0x84&&primary(x)).sort((a,b)=>b.time-a.time)[0];
  const clients=(cr?.fields.bss||[]).flatMap(b=>(b.clients||[]).map(c=>({...c,bssid:b.bssid}))),bsses=state.operational_bss||[],ids=radioIds(),nodes=[],links=[];
  const add=(id,kind,title,sub,detail,x,y,band='unknown')=>nodes.push({id,kind,title,sub,detail,x,y,band});
  const edge=(a,b,kind,label,band='unknown',stale=false)=>links.push({a,b,kind,label,band,stale});
@@ -42,6 +43,29 @@ function meshModel(){
   const band=meshBand(b.radio,obs),metrics=obs.find(x=>x.type===0x96&&x.fields.station===c.station);
   add('client-'+c.station,'client',state.client_telemetry?.[c.station]?.identity?.label==='Unknown device'?'Wi-Fi client':(state.client_telemetry?.[c.station]?.identity?.label||'Wi-Fi client')+' (inferred)',c.station,{...c,band,ssid:b.ssid,evidence:'Associated Clients TLV 0x84',reported_at:new Date(cr.time*1000).toLocaleString(),link_metrics:metrics?{...metrics.fields,reported_at:new Date(metrics.time*1000).toLocaleString()}:'Not measured',telemetry:state.client_telemetry?.[c.station]||'Not measured',note:'Identity hints are self-reported, not verified hardware identity.'},1100,250+i*155,band);
   edge('bss-'+b.bssid,'client-'+c.station,'wireless',band,band,Date.now()/1000-cr.time>90||!state.agent_recent);
+ });
+ // Further admitted agents, e.g. an extender on a wireless backhaul behind the primary agent.
+ // 802.11 media info is the network BSSID, then the role: 0x40 is a (backhaul) STA,
+ // whose BSSID is the BSS it joined, or all zeros while it is not associated.
+ Object.entries(state.agents||{}).forEach(([al,a],k)=>{
+  const id='agent-'+al,stale=!a.last_seen||Date.now()/1000-a.last_seen>90,dev=state.topology?.[al]?.device,ifaces=dev?.interfaces||[];
+  const wifi=ifaces.find(x=>/^0x01/.test(x.media_type)&&x.media_info?.slice(12,14)==='40'&&!/^0{12}/.test(x.media_info)),parent=wifi?.media_info?.slice(0,12).match(/../g)?.join(':');
+  const wired=!wifi&&ifaces.some(x=>/^0x00/.test(x.media_type));
+  const up=bsses.find(b=>b.bssid===parent),upBand=up?meshBand(up.radio,obs):'unknown',own=a.operational_bss||[];
+  add(id,'agent',Object.values(state.radios||{}).find(r=>r.agent===al&&r.model)?.model||'EasyMesh agent',al,{role:'Agent',al_mac:al,status:a.status,last_seen:a.last_seen?new Date(a.last_seen*1000).toLocaleString():'Not seen',backhaul:wifi?{interface:wifi.mac,media_type:wifi.media_type,joined_bssid:parent||'Not reported'}:'Not reported',reported_ssids:[...new Set(own.map(b=>b.ssid))],evidence:'Admitted agent; Device Information TLV 0x03, AP Operational BSS TLV 0x83'},490,600+k*260,upBand);
+  if(wifi)edge(up?'bss-'+up.bssid:'agent',id,'wireless','Wi-Fi backhaul',upBand,stale);
+  else if(wired)edge('controller',id,'wired','Ethernet · 1905.1','unknown',stale);
+  else edge('agent',id,'wired','Backhaul not reported','unknown',stale);
+  const report=obs.filter(x=>x.type===0x84&&x.agent===al).sort((x,y)=>y.time-x.time)[0];
+  own.forEach((b,i)=>{
+   const band=meshBand(b.radio,obs);
+   add('bss-'+b.bssid,'bss',b.ssid||'(hidden / empty SSID)',band,{...b,band,agent:al,evidence:'AP Operational BSS TLV 0x83'},750,560+k*260+i*170,band);
+   edge(id,'bss-'+b.bssid,'membership',band,band,stale);
+   (report?.fields.bss||[]).filter(x=>x.bssid===b.bssid).flatMap(x=>x.clients||[]).forEach((c,j)=>{
+    add('client-'+c.station,'client','Wi-Fi client',c.station,{...c,band,ssid:b.ssid,agent:al,evidence:'Associated Clients TLV 0x84'},1100,600+k*260+j*155,band);
+    edge('bss-'+b.bssid,'client-'+c.station,'wireless',band,band,stale);
+   });
+  });
  });
  return {nodes,links,br,cr,clients,ids,bsses,unmatched};
 }

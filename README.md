@@ -10,7 +10,7 @@ on the way to one EasyMesh system on wmediumd with native agents and OpenSync po
 
 A Python IEEE 1905.1 / EasyMesh controller with a browser teaching panel. Inspect packets and TLVs, follow message IDs, draw topology, send protocol commands, and compare requested configuration with what an agent actually reports.
 
-This is an experimental **single-agent** lab, not a certified or complete EasyMesh controller. It uses Python for the protocol and services, and vanilla JavaScript/HTML/CSS for the panel. Linux raw sockets require root for live operation; offline tests and the panel do not.
+This is an experimental **multi-agent** lab: a wired primary agent plus further agents onboarded through it, for example on a wireless backhaul ([SECOND-EXTENDER.md](docs/SECOND-EXTENDER.md)). It is not a certified or complete EasyMesh controller. It uses Python for the protocol and services, and vanilla JavaScript/HTML/CSS for the panel. Linux raw sockets require root for live operation; offline tests and the panel do not.
 
 ## Features
 
@@ -80,7 +80,7 @@ This marker does not pause topology/metrics traffic. The panel's display pause a
 
 - Live testing covered a TP-Link RE653BE. Profile 1/2 advertisement is a lab persona, not a claim of conformance.
 - Lower-band SSID provisioning worked. The agent did not supply a 6 GHz M1. A manually enabled 6 GHz BSS supported a Mac connection and local throughput test with onboarding replies paused. **Controller-based 6 GHz provisioning remains unverified.**
-- No DPP, full MLO configuration, traffic separation, wireless backhaul configuration, or multiple-agent management.
+- No DPP, full MLO configuration or traffic separation. Wireless backhaul is limited to a fronthaul BSS that doubles as backhaul BSS, and further agents must be admitted by hand; see [SECOND-EXTENDER.md](docs/SECOND-EXTENDER.md). Not yet tested live.
 - Fragmented inbound CMDUs are rejected. Unknown TLVs remain visible as raw bytes.
 - Agent topology is reported evidence, not independent RF capture. Speed tests measure browser payload throughput across the entire Ethernet/Wi-Fi path, not radio PHY speed.
 - The panel is intended for an isolated/trusted lab. Host/client allowlists and a per-process request token are not user authentication or TLS. Loopback is the default.
@@ -104,7 +104,9 @@ A controller-side [optimizer scaffold](docs/OPTIMIZER.md) evaluates measurements
 
 Protocol references and publication notes are in [REFERENCES.md](docs/REFERENCES.md). No license has been selected yet; add your chosen license before granting reuse rights.
 
-See [Single-extender experiments and the 1905.1 oscilloscope](docs/LEARNING-LAB.md) for supervised steering, persistent client history, guided TLV exercises, optimizer observation and 6 GHz diagnostics.
+See [A second extender on a wireless backhaul](docs/SECOND-EXTENDER.md) for push-button onboarding of a second agent through the first.
+
+See [Extender experiments and the 1905.1 oscilloscope](docs/LEARNING-LAB.md) for supervised steering, persistent client history, guided TLV exercises, optimizer observation and 6 GHz diagnostics.
 
 See [LXD VM deployment](deploy/lxd-vm/README.md) for native services, USB ownership, OpenSpeedTest, isolation and rollback.
 

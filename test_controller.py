@@ -18,7 +18,7 @@ class ControllerTests(unittest.TestCase):
         ctl=c.Controller.__new__(c.Controller)
         ctl.args=SimpleNamespace(controller='02:00:00:00:00:01',target='02:00:00:00:01:35')
         ctl.checkpoint=lambda:None
-        seen=[];ctl.topology=lambda mid:seen.append(mid)
+        seen=[];ctl.topology=lambda mid,dst=None:seen.append(mid)
         with tempfile.TemporaryDirectory() as tmp:
             marker=Path(tmp)/'paused';marker.touch()
             with patch.object(c,'ONBOARDING_PAUSE',marker):
@@ -109,5 +109,75 @@ class ControllerTests(unittest.TestCase):
         m1=synthetic_m1()
         pkt=c.frame(ctl.args.target,ctl.args.controller,9,99,tlv(0x82,macbytes(rid))+tlv(0x11,m1))
         with self.assertRaisesRegex(ValueError,'refusing legacy credentials'):ctl.handle(pkt)
+
+SECOND='02:00:00:00:02:35'
+
+class MultiAgentTests(unittest.TestCase):
+    """A second extender on a wireless backhaul behind the primary (wired) agent."""
+    def setUp(self):
+        tmp=tempfile.TemporaryDirectory();self.addCleanup(tmp.cleanup)
+        marker=patch.object(c,'ONBOARDING_PAUSE',Path(tmp.name)/'paused')
+        marker.start();self.addCleanup(marker.stop)
+        ctl=c.Controller.__new__(c.Controller)
+        ctl.args=SimpleNamespace(controller='02:00:00:00:00:01',target='02:00:00:00:01:35')
+        ctl.config={'ssid':'EasyMesh-Lab','password':'TestSecret123','revision':1,'backhaul_bands':['5'],'agents':[SECOND]}
+        ctl.uuid=b'R'*16;ctl.state={'radios':{},'operational_bss':[],'status':'waiting_for_agent'}
+        ctl.cache={};ctl.last_response={};ctl.checkpoint=lambda:None
+        self.sent=[];ctl.send=lambda *args,**kwargs:self.sent.append((args,kwargs))
+        self.raw=[];ctl.sock=SimpleNamespace(send=self.raw.append)
+        self.ctl=ctl
+    def search(self,src):
+        return c.frame(src,c.MULTICAST,7,5,tlv(1,macbytes(src))+tlv(13,b'\0')+tlv(14,b'\x01')+tlv(0x81,b'\x01\x00'))
+
+    def test_unknown_agent_is_pending_and_never_answered(self):
+        stranger='02:00:00:00:03:35'
+        self.ctl.handle(self.search(stranger));self.ctl.handle(self.search(stranger))
+        self.assertEqual((self.sent,self.raw),([],[]))
+        entry=self.ctl.state['pending_agents'][stranger]
+        self.assertEqual((entry['al_mac'],entry['messages']),(stranger,{'0x0007':2}))
+
+    def test_admitted_agent_gets_its_own_replies_and_state(self):
+        self.ctl.handle(self.search(SECOND))
+        self.assertEqual(parse(self.raw[0])['dst'],SECOND)
+        radio=macbytes('02:00:00:00:02:37')
+        self.ctl.handle(c.frame(SECOND,self.ctl.args.controller,9,6,tlv(0x85,radio+b'\x03\x00')+tlv(0x11,synthetic_m1())))
+        (kind,_),kwargs=self.sent[0]
+        self.assertEqual((kind,kwargs),(9,{'dst':SECOND}))
+        self.assertEqual(self.ctl.state['radios']['02:00:00:00:02:37']['agent'],SECOND)
+        self.assertEqual(self.ctl.state['status'],'waiting_for_agent')  # the primary is untouched
+        value=bytes.fromhex('01020000000237010200000002370c456173794d6573682d4c6162')
+        self.ctl.handle(c.frame(SECOND,self.ctl.args.controller,3,7,tlv(0x83,value)))
+        self.assertEqual(self.ctl.state['agents'][SECOND]['status'],'ssid_confirmed_in_agent_topology')
+        self.assertEqual(self.ctl.state['operational_bss'],[])
+
+    def test_primary_status_ignores_other_agents_radios(self):
+        self.ctl.state['radios']={'02:00:00:00:01:37':{'rf_bands':2,'revision':1},
+                                  '02:00:00:00:02:37':{'rf_bands':2,'revision':1,'agent':SECOND}}
+        value=bytes.fromhex('01020000000137010200000001370c456173794d6573682d4c6162')
+        self.ctl.handle(c.frame(self.ctl.args.target,self.ctl.args.controller,3,8,tlv(0x83,value)))
+        self.assertEqual(self.ctl.state['status'],'ssid_confirmed_in_agent_topology')
+
+    def test_topology_shows_a_wireless_backhaul_interface(self):
+        bsta=macbytes('02:00:00:00:02:3f')
+        # Device Information: AL MAC, one interface, media 0x0105 (802.11ac) with 10 bytes of 802.11 info.
+        info=macbytes(SECOND)+b'\x01'+bsta+b'\x01\x05\x0a'+bytes(10)
+        self.ctl.handle(c.frame(SECOND,self.ctl.args.controller,3,9,tlv(3,info)+tlv(7,bsta+macbytes(self.ctl.args.target)+b'\x00')))
+        seen=self.ctl.state['topology'][SECOND]
+        self.assertEqual(seen['device']['interfaces'][0]['media_type'],'0x0105')
+        self.assertEqual(seen['neighbors'][0]['neighbors'][0]['al_mac'],self.ctl.args.target)
+
+    def test_separate_backhaul_sends_two_m2s_in_one_message(self):
+        self.ctl.config.update(backhaul_ssid='EasyMesh-Lab-BH',backhaul_password='BackhaulSecret9')
+        radio=macbytes('02:00:00:00:01:37')  # the synthetic M1 is a 5 GHz radio
+        self.ctl.handle(c.frame(self.ctl.args.target,self.ctl.args.controller,9,11,tlv(0x85,radio+b'\x03\x00')+tlv(0x11,synthetic_m1())))
+        (kind,body),_=self.sent[0]
+        self.assertEqual(len(parse(c.frame(self.ctl.args.controller,self.ctl.args.target,kind,1,body))['tlvs'][0x11]),2)
+        self.assertEqual(self.ctl.state['radios']['02:00:00:00:01:37']['backhaul_ssid_sent'],'EasyMesh-Lab-BH')
+
+    def test_push_button_join_is_recorded(self):
+        join=macbytes(self.ctl.args.controller)+b'\x00\x2a'+macbytes('02:00:00:00:01:37')+macbytes('02:00:00:00:02:3f')
+        self.ctl.handle(c.frame(self.ctl.args.target,c.MULTICAST,0x0c,10,tlv(1,macbytes(self.ctl.args.target))+tlv(0x13,join)))
+        joined=self.ctl.state['push_button']['joins'][0]
+        self.assertEqual((joined['event_mid'],joined['new_interface'],joined['reported_by']),(42,'02:00:00:00:02:3f',self.ctl.args.target))
 
 if __name__=='__main__':unittest.main()

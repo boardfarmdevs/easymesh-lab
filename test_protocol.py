@@ -45,6 +45,58 @@ class ProtocolTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     build_command(name, params, {})
 
+    def test_push_button_tlvs_decode(self):
+        second = '02:00:00:00:02:3f'
+        event = decode_packet(frame(HOST, '01:80:c2:00:00:13', 0x0b, 42, tlv(1, bytes.fromhex('020000000001'))+tlv(0x12, b'\x00'), 0xc0))
+        self.assertEqual((event['relay'], event['tlvs'][1]['fields']['media']), (True, []))
+        join = tlv(0x13, bytes.fromhex('020000000001')+b'\x00\x2a'+bytes.fromhex('020000000137')+bytes.fromhex(second.replace(':', '')))
+        fields = decode_packet(frame(AGENT, HOST, 0x0c, 43, join))['tlvs'][0]['fields']
+        self.assertEqual((fields['event_mid'], fields['new_interface']), (42, second))
+
+    def test_push_button_and_agent_parameters(self):
+        from protocol import LOOKUP
+        [(kind, body)] = build_command('push_button', {}, {'controller': HOST})
+        self.assertEqual((kind, body), (0x0b, tlv(1, bytes.fromhex('020000000001'))+tlv(0x12, b'\x00')))
+        for name, params in (('push_button', {}), ('admit_agent', {}), ('admit_agent', {'agent': 'nope'}), ('topology', {'agent': 'nope'})):
+            with self.subTest(name=name, params=params), self.assertRaises(ValueError):
+                build_command(name, params, {})
+        self.assertEqual(build_command('topology', {'agent': '02:00:00:00:02:35'}, {}), [(2, b'')])
+        self.assertIn('agent', [f['name'] for f in LOOKUP['topology']['fields']])
+        self.assertNotIn('agent', [f['name'] for f in LOOKUP['reonboard']['fields']])
+
+    def test_push_button_and_admit_commands(self):
+        second = '02:00:00:00:02:35'
+        with tempfile.TemporaryDirectory() as tmp, patch.object(workbench, 'BASE', Path(tmp)):
+            config = Path(tmp)/'config.json'; config.write_text('{}')
+            sent = []
+            ctl = SimpleNamespace(args=SimpleNamespace(config=config, target=AGENT), state={'controller': HOST},
+                                  checkpoint=lambda: None, config={'ssid': 'Lab', 'password': 'TestSecret123', 'revision': 1},
+                                  send=lambda kind, body, **kw: sent.append((kind, body, kw)) or 42)
+            ctl.agents = lambda: [AGENT, *ctl.config.get('agents', [])]
+            wb = workbench.Workbench(ctl)
+            try:
+                def run(name, params):
+                    command = '%032x' % len(sent + list((Path(tmp)/'results').glob('*.json')))
+                    (Path(tmp)/'commands'/f'{command}.json').write_text(json.dumps({'name': name, 'params': params}))
+                    wb.tick()
+                    return json.loads((Path(tmp)/'results'/f'{command}.json').read_text())
+                self.assertIn('backhaul_bands', run('push_button', {})['error'])
+                ctl.config['backhaul_bands'] = ['5']
+                (Path(tmp)/'onboarding.paused').touch()
+                self.assertIn('paused', run('push_button', {})['error'])
+                (Path(tmp)/'onboarding.paused').unlink()
+                self.assertEqual(run('push_button', {})['status'], 'sent')
+                self.assertEqual(sent[-1][2], {'dst': '01:80:c2:00:00:13', 'flags': 0xc0})
+                self.assertEqual(ctl.state['push_button']['mid'], 42)
+                self.assertIn('not an admitted agent', run('topology', {'agent': second})['error'])
+                ctl.state['pending_agents'] = {second: {}}
+                admitted = run('admit_agent', {'agent': second.upper()}); self.assertEqual(admitted['status'], 'applied', admitted)
+                self.assertEqual((json.loads(config.read_text())['agents'], ctl.state['pending_agents']), ([second], {}))
+                run('topology', {'agent': second})
+                self.assertEqual(sent[-1][:3], (2, b'', {'dst': second}))
+            finally:
+                wb.stream.close()
+
     def test_reply_matching_and_ack_do_not_claim_success(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(workbench, 'BASE', Path(tmp)):
             config = Path(tmp)/'config.json'; config.write_text('{}')

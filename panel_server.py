@@ -54,11 +54,14 @@ def validate(name,params):
 
 def preview(name,params):
     validate(name,params);s=state();src=s.get('controller','02:00:00:00:00:01');dst=s.get('target','02:00:00:00:01:35')
+    if name=='push_button':dst='01:80:c2:00:00:13'
+    elif params.get('agent'):dst=str(params['agent']).strip().lower()
     if name in ('set_ssid','reonboard','enable_6ghz'):
         from responder import tlv,macbytes
         recipes=[(10,tlv(1,macbytes(src))+tlv(15,b'\0')+tlv(16,bytes([band]))) for band in ((0,1,3) if name=='enable_6ghz' or read_json(BASE/'config.json',{}).get('enable_6ghz') else (0,1))]
     else:recipes=build_command(name,params,s)
-    return {'packets':[decode_packet(frame(src,dst,k,0,b)) for k,b in recipes],
+    flags=0xc0 if name=='push_button' else 0x80  # relayed multicast
+    return {'packets':[decode_packet(frame(src,dst,k,0,b,flags)) for k,b in recipes],
             'note':'Preview only; message ID 0 is a placeholder. WSC nonces, keys and encrypted M2 are created only when the agent sends M1.' if name in ('set_ssid','reonboard','enable_6ghz') else 'Preview only. A fresh message ID is assigned when sent.',
             'expected':LOOKUP[name]['expected']}
 
