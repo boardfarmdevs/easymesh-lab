@@ -45,6 +45,24 @@ class BuildTests(unittest.TestCase):
         self.assertNotIn('rev120', repr(commands))
         self.assertNotIn('10.77.171.1', repr(commands))
 
+    def test_no_automatic_updates_before_the_first_apt_get(self):
+        with patch('sys.argv', self.arguments()), patch.object(build, 'output', side_effect=self.output), \
+             patch.object(build, 'run') as run, patch.object(build.subprocess, 'run', return_value=SimpleNamespace(returncode=0)):
+            build.main()
+        commands = [c.args for c in run.call_args_list]
+        off = next(i for i, c in enumerate(commands) if c[-1] == build.NO_AUTOMATIC_UPDATES)
+        first_apt = next(i for i, c in enumerate(commands) if 'apt-get' in c)
+        self.assertLess(off, first_apt)
+        self.assertEqual(commands[off][-3:-1], ('bash', '-euc'))
+        script = build.NO_AUTOMATIC_UPDATES
+        for line in ('systemctl mask --now apt-daily.timer apt-daily-upgrade.timer',
+                     'systemctl mask apt-daily.service apt-daily-upgrade.service',
+                     'systemctl disable --now unattended-upgrades.service 2>/dev/null || true',
+                     '    snap refresh --hold'):
+            self.assertIn(line, script.splitlines())
+        self.assertIn('APT::Periodic::Unattended-Upgrade "0";', script)
+        self.assertEqual(__import__('subprocess').run(['bash', '-n'], input=script, text=True).returncode, 0)
+
     def test_existing_vm_never_modified(self):
         with patch('sys.argv', self.arguments()), patch.object(build, 'output', return_value='[{"name":"portable-lab"}]'), patch.object(build, 'run') as run:
             with self.assertRaises(SystemExit): build.main()

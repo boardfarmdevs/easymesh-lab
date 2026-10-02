@@ -12,6 +12,8 @@ in that host checkout. `/opt/easymesh-lab` inside the VM is the deployed
 runtime copy; new builds include committed source only, never host secrets,
 captures, virtual environments or uncommitted changes. `BUILD.json` records
 the source and OpenSpeedTest revisions. An existing VM is never overwritten.
+The VM takes no automatic updates (the build masks apt's daily timers and holds
+every snap): an unattended upgrade restarts services under a running lab.
 
 Prerequisites: Linux with working LXD VM support, access to `lxc`, Python 3,
 Git, a managed LXD bridge with DHCP, an existing storage pool, and internet

@@ -11,6 +11,25 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 OST_REV = 'f4263546f50694a154fdd27a03000390949068df'
+# A lab VM takes no automatic updates: an unattended upgrade restarts services under a
+# running lab. apt-get and snap refresh by hand keep working. Runs in the guest.
+NO_AUTOMATIC_UPDATES = r'''
+systemctl mask --now apt-daily.timer apt-daily-upgrade.timer
+# a run in flight holds the dpkg lock: it finishes first
+while systemctl show -p ActiveState --value apt-daily.service apt-daily-upgrade.service \
+    | grep -Eq '^(activating|active)$'; do
+    sleep 2
+done
+systemctl mask apt-daily.service apt-daily-upgrade.service
+systemctl disable --now unattended-upgrades.service 2>/dev/null || true
+printf '%s\n' 'APT::Periodic::Update-Package-Lists "0";' \
+    'APT::Periodic::Unattended-Upgrade "0";' \
+    > /etc/apt/apt.conf.d/99-lab-no-automatic-updates
+if command -v snap >/dev/null 2>&1; then
+    snap wait system seed.loaded
+    snap refresh --hold
+fi
+'''
 
 def run(*args, **kwargs):
     return subprocess.run(args, check=True, **kwargs)
@@ -82,6 +101,7 @@ def main():
     def guest_run(*args):
         return run('lxc', 'exec', a.name, '--', *args)
     guest_run('cloud-init', 'status', '--wait')
+    guest_run('bash', '-euc', NO_AUTOMATIC_UPDATES)
     guest_run('env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'update')
     guest_run('env', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', '--no-install-recommends',
               'python3-venv', 'python3-pip', 'nginx', 'wireshark-common', 'ethtool', 'usbutils',
