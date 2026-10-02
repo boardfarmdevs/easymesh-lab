@@ -1,5 +1,7 @@
 # Client telemetry and identification
 
+[Documents](../README.md)
+
 The controller polls Associated STA Link Metrics (0x800d) for up to eight reported clients every 15 seconds, rotating through larger lists. Turning off periodic queries also stops this polling. No steering or configuration change is part of telemetry polling.
 
 Client cards and topology nodes show signal bars. The signal source is the agent's uplink RCPI in Associated STA Link Metrics TLV 0x96: AP receive power, not the phone's measurement of the AP. For values 1–219, power is RCPI/2 − 110 dBm with 0.5 dB encoding steps. Zero and 220 are saturation bounds; 221–254 are reserved and 255 is unavailable. This is an RCPI-derived power estimate, not a calibrated independent RSSI measurement.

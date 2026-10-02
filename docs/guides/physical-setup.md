@@ -1,5 +1,7 @@
 # Physical setup and host migration
 
+[Documents](../README.md)
+
 Use a dedicated Ethernet adapter connected directly to one lab agent. Keep the host's management interface outside the namespace. This setup provides no NAT, default route, or internet forwarding.
 
 ## 1. Install and identify the interface
@@ -33,7 +35,14 @@ mkdir -p run
 
 `config.json` is mode 0600 and excluded from Git. Read the generated password locally when joining a client. Do not paste it into a committed document.
 
-To preserve manually enabled 6 GHz settings during observation, create `onboarding.paused` before starting the controller. Remove it when deliberately testing controller onboarding.
+Change the SSID later, keeping the generated password, or replace the password from a private local file:
+
+```bash
+"$LAB_PY" controller.py set-ssid --ssid My-Lab
+"$LAB_PY" controller.py set-ssid --ssid My-Lab --password-file /path/to/private-password.txt
+```
+
+Configuration changes normally trigger re-onboarding. To suppress onboarding responses and renews while observing manual device settings (for example manually enabled 6 GHz settings), create `onboarding.paused`; remove it to resume onboarding, with no restart needed. The marker does not pause topology or metrics traffic; the panel's display pause and periodic-query pause are different controls.
 
 ## 3. Create the namespace
 
@@ -93,7 +102,7 @@ For a browser on another management host, specify both the server name/IP used i
 
 Open `http://YOUR_LAB_HOST_IP:8765`. For a Host/client rejection, check those two values; refresh after restarting the server to obtain a new request token.
 
-Optional passive device identification: run `device_observer.py --interface "$LAB_IFACE"` using the same privileged namespace/interpreter invocation as the controller. See [TELEMETRY.md](TELEMETRY.md). Stop this observer along with the other services before unplugging the adapter.
+Optional passive device identification: run `device_observer.py --interface "$LAB_IFACE"` using the same privileged namespace/interpreter invocation as the controller. See [client telemetry](../concepts/client-telemetry.md). Stop this observer along with the other services before unplugging the adapter.
 
 ## 5. Move to another host
 

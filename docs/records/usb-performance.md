@@ -1,5 +1,7 @@
 # USB client performance findings
 
+[Documents](../README.md)
+
 Observed 2026-09-28 with two MT7925U USB Wi-Fi clients, a Realtek 2.5 GbE adapter, an Ubuntu LXD VM, and a TP-Link RE653BE. These are single-lab observations, not product benchmarks.
 
 ## Discovery-related interruptions

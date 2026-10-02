@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-spec = importlib.util.spec_from_file_location('build_vm', Path(__file__).parent/'deploy/lxd-vm/build_vm.py')
+spec = importlib.util.spec_from_file_location('build_vm', Path(__file__).parent.parent/'deploy/lxd-vm/build_vm.py')
 build = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(build)
 

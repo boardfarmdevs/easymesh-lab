@@ -1,28 +1,31 @@
-# EasyMesh Protocol Lab
+# easymesh-lab: the EasyMesh protocol on certified hardware
 
 <!-- labs block: the same in every repository of the EasyMesh labs, but for the Site line -->
-**Site:** <https://boardfarmdevs.github.io/easymesh-lab/>.
-The [EasyMesh labs](https://boardfarmdevs.github.io/easymesh-labs/) serve three
+**Site:** <https://vcpe.dev/easymesh-lab/>
+The [EasyMesh labs](https://mesh.vcpe.dev/) serve three
 goals: EasyMesh optimizer development
-([easymesh-optimizer](https://github.com/boardfarmdevs/easymesh-optimizer)) in a rich
+([easymesh-optimizer](https://vcpe.dev/easymesh-optimizer/)) in a rich
 virtual lab, on both stacks
-([RDK EasyMesh](https://boardfarmdevs.github.io/meta-cmf-bananapi-vcpe/),
-[prplMesh](https://boardfarmdevs.github.io/prplmesh-lab/)); unchanged OpenSync
+([RDK EasyMesh](https://vcpe.dev/meta-cmf-bananapi-vcpe/),
+[prplMesh](https://vcpe.dev/prplmesh-lab/)); unchanged OpenSync
 pods as EasyMesh agents under a local controller, without the OpenSync cloud
-([EMOSA](https://boardfarmdevs.github.io/emosa-lab/), with the
-[OpenSync lab](https://boardfarmdevs.github.io/opensync-lab/)'s pods); and
+([EMOSA](https://vcpe.dev/emosa-lab/), with the
+[OpenSync lab](https://vcpe.dev/opensync-lab/)'s pods); and
 EasyMesh on physical hardware
-([Protocol lab](https://boardfarmdevs.github.io/easymesh-lab/)). Two core
+([Protocol lab](https://vcpe.dev/easymesh-lab/)). Two core
 components carry them: the RF medium
-([easymesh-medium](https://github.com/boardfarmdevs/easymesh-medium)) and EMOSA's
-OVSDB ⇄ EasyMesh conversion. The rest is infrastructure and learning around them.
+([easymesh-medium](https://vcpe.dev/easymesh-medium/)) and EMOSA's
+OVSDB ⇄ EasyMesh conversion. The rest is infrastructure, tools (the
+[room builder](https://vcpe.dev/easymesh-room-builder/)) and learning
+around them.
 <!-- /labs block -->
 
-A Python IEEE 1905.1 / EasyMesh controller with a browser teaching panel. Inspect packets and TLVs, follow message IDs, draw topology, send protocol commands, and compare requested configuration with what an agent actually reports.
-
-This is an experimental **multi-agent** lab: a wired primary agent plus further agents onboarded through it, for example on a wireless backhaul ([SECOND-EXTENDER.md](docs/SECOND-EXTENDER.md)). It is not a certified or complete EasyMesh controller. It uses Python for the protocol and services, and vanilla JavaScript/HTML/CSS for the panel. Linux raw sockets require root for live operation; offline tests and the panel do not.
-
-## Features
+A from-scratch Python IEEE 1905.1 / EasyMesh controller with a browser teaching panel,
+driving real extenders (a TP-Link RE653BE, a second extender on its wireless backhaul)
+and real clients. Inspect packets and TLVs, follow message IDs, draw the topology, send
+protocol commands, and compare the configuration you asked for with what an agent
+reports. It is an experimental multi-agent lab, not a certified or complete EasyMesh
+controller ([its limitations](docs/reference/limitations.md)).
 
 - Discovery, topology, AP capabilities, and WSC M1/M2 credential exchange.
 - 2.4/5 GHz WPA2 provisioning, SSID changes, and re-onboarding.
@@ -33,27 +36,38 @@ This is an experimental **multi-agent** lab: a wired primary agent plus further 
 - Local browser speed tests initiated by the client or the controller panel. These require an open cooperating browser; IEEE 1905.1 cannot make an arbitrary client run this application test.
 - Optional Python DHCP server, isolated network namespace, and independent full Ethernet capture.
 
-## Build the LXD lab
+## Components
 
-Use the host checkout to [build a fresh VM](deploy/lxd-vm/README.md), including
-the controller, panel, capture services and OpenSpeedTest. Use any suitable
-Linux/LXD host and supply its network, storage and hardware parameters. The
-VM runs its deployed copy at `/opt/easymesh-lab`.
+| Part | What it is |
+| --- | --- |
+| `controller.py`, `responder.py`, `wsc.py` | the raw-Ethernet protocol and the WSC crypto |
+| `protocol.py`, `protocol_names.json`, `workbench.py` | TLVs, command recipes, evidence and queues |
+| `optimizer.py`, `experiments.py`, `client_telemetry.py`, `device_observer.py` | the advisory optimizer, the experiments, client telemetry and passive device hints |
+| `panel_server.py`, [panel/](panel) | the teaching panel and the client speed-test page |
+| `lab_dhcp.py`, `speed_server.py`, `speed_store.py` | the local IP service and the throughput endpoint |
+| [deploy/lxd-vm/](deploy/lxd-vm/README.md) | the lab VM: build, native services, USB ownership, OpenSpeedTest, isolation and rollback |
+| [tools/](tools) | the panel's browser smoke tests and the USB Wi-Fi client manager |
+| [tests/](tests) | offline tests with synthetic identities and fixtures |
+| [site/](site) | the explainer site |
 
-## Quick start: offline
+Python 3.10 or newer for the protocol and services, vanilla JavaScript, HTML and CSS for
+the panel. Live operation needs root for the raw sockets; the offline tests and the panel
+do not. No license has been selected yet; add one before granting reuse rights.
 
-Python 3.10 or newer:
+## Getting started
+
+Offline, without a device:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m unittest -v test_wsc test_controller test_protocol test_speed test_telemetry test_optimizer
-.venv/bin/python panel_server.py
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python panel_server.py            # http://127.0.0.1:8765
 ```
 
-Open http://127.0.0.1:8765. A fresh checkout has no live agent, credentials, or recorded captures. The unit tests use synthetic identities and a synthetic M1, including duplicate vendor extensions; they do not send network packets or require root.
-
-Optional browser validation (starts its own loopback panel, without a device):
+A fresh checkout has no live agent, credentials or recorded captures; the tests use
+synthetic identities and a synthetic M1, send no packets and need no root. Browser
+validation starts its own loopback panel:
 
 ```bash
 .venv/bin/python -m pip install -r requirements-dev.txt
@@ -61,63 +75,15 @@ Optional browser validation (starts its own loopback panel, without a device):
 .venv/bin/python tools/smoke_panel.py
 ```
 
-For physical setup and migration to another host, follow [SETUP.md](docs/SETUP.md). The lab's client subnet is currently fixed at **10.203.88.0/24** and must not overlap another network on the lab host. Only the explicitly selected USB Ethernet interface goes into the isolated namespace.
+With hardware: [build the lab VM](deploy/lxd-vm/README.md) on a Linux LXD host (it runs
+its deployed copy at `/opt/easymesh-lab`), or follow the
+[physical setup](docs/guides/physical-setup.md) on a host directly. The lab's client
+subnet is fixed at **10.203.88.0/24** and must not overlap another network on the host;
+only the selected USB Ethernet interface goes into the isolated namespace.
 
-## Learn and operate
+## Documentation
 
-See [WORKBENCH.md](docs/WORKBENCH.md) for panel behavior and [EXPERIMENTS.md](docs/EXPERIMENTS.md) for observed RE653BE behavior, the 6 GHz limitation, DHCP findings, and USB throughput comparison.
-
-```bash
-# Creates private config.json with a random password and UUID.
-.venv/bin/python controller.py init --ssid EasyMesh-Lab
-# Set a new SSID, preserving the generated password.
-.venv/bin/python controller.py set-ssid --ssid My-Lab
-# Optional replacement password, read from a private local file.
-.venv/bin/python controller.py set-ssid --ssid My-Lab --password-file /path/to/private-password.txt
-```
-
-Configuration changes normally trigger re-onboarding. To temporarily suppress onboarding responses and renews while observing manual device settings:
-
-```bash
-touch onboarding.paused
-# Remove this marker to resume onboarding. No restart is needed.
-rm onboarding.paused
-```
-
-This marker does not pause topology/metrics traffic. The panel's display pause and periodic-query pause are different controls.
-
-## Limitations and evidence
-
-- Live testing covered a TP-Link RE653BE. Profile 1/2 advertisement is a lab persona, not a claim of conformance.
-- Lower-band SSID provisioning worked. The agent did not supply a 6 GHz M1. A manually enabled 6 GHz BSS supported a Mac connection and local throughput test with onboarding replies paused. **Controller-based 6 GHz provisioning remains unverified.**
-- No DPP, full MLO configuration or traffic separation. Wireless backhaul is limited to a fronthaul BSS that doubles as backhaul BSS, and further agents must be admitted by hand; see [SECOND-EXTENDER.md](docs/SECOND-EXTENDER.md). Not yet tested live.
-- Fragmented inbound CMDUs are rejected. Unknown TLVs remain visible as raw bytes.
-- Agent topology is reported evidence, not independent RF capture. Speed tests measure browser payload throughput across the entire Ethernet/Wi-Fi path, not radio PHY speed.
-- The panel is intended for an isolated/trusted lab. Host/client allowlists and a per-process request token are not user authentication or TLS. Loopback is the default.
-- Raw captures and logs can contain client identities and sensitive protocol material. Runtime data is gitignored and is not included in this repository.
-
-## Signal telemetry and optimizer
-
-Client nodes include RCPI-derived signal bars, measurement age, and inferred device labels from DHCP/mDNS and cooperating browser hints. Missing RSSI/SNR stays explicitly unavailable. See [TELEMETRY.md](docs/TELEMETRY.md).
-
-A controller-side [optimizer scaffold](docs/OPTIMIZER.md) evaluates measurements in advisory mode. Automatic steering is disabled; candidate measurements and multi-agent support remain prerequisites.
-
-## Source map
-
-| Files | Purpose |
-| --- | --- |
-| `controller.py`, `responder.py`, `wsc.py` | Raw Ethernet protocol and WSC crypto |
-| `protocol.py`, `protocol_names.json`, `workbench.py` | TLVs, command recipes, evidence and queues |
-| `panel_server.py`, `panel/` | Teaching panel and client speed-test page |
-| `lab_dhcp.py`, `speed_server.py`, `speed_store.py` | Local IP service and throughput endpoint |
-| `test_*.py` | Offline validation and synthetic fixtures |
-
-Protocol references and publication notes are in [REFERENCES.md](docs/REFERENCES.md). No license has been selected yet; add your chosen license before granting reuse rights.
-
-See [A second extender on a wireless backhaul](docs/SECOND-EXTENDER.md) for push-button onboarding of a second agent through the first.
-
-See [Extender experiments and the 1905.1 oscilloscope](docs/LEARNING-LAB.md) for supervised steering, persistent client history, guided TLV exercises, optimizer observation and 6 GHz diagnostics.
-
-See [LXD VM deployment](deploy/lxd-vm/README.md) for native services, USB ownership, OpenSpeedTest, isolation and rollback.
-
-USB Wi-Fi clients: see [managed client namespaces and iperf3](docs/USB-WIFI-CLIENTS.md).
+The [site](https://vcpe.dev/easymesh-lab/) explains the lab and the protocol
+it teaches. The documents are indexed in [docs/README.md](docs/README.md): the teaching
+panel, the experiments, a second extender, USB Wi-Fi clients, client telemetry, the
+optimizer, the references and the recorded findings.

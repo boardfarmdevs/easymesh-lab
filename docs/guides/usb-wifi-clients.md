@@ -1,5 +1,7 @@
 # Managed USB Wi-Fi test clients
 
+[Documents](../README.md)
+
 Two explicitly enrolled USB Wi-Fi adapters can act as real stations inside the lab VM. Each physical PHY is moved into its own network namespace. No veth, bridge, default route or NAT connects those namespaces. Client-to-client traffic must traverse the extender over the air. Same-radio tests consume airtime on both legs and are not equivalent to the wired-server OpenSpeedTest result.
 
 ## Deployment

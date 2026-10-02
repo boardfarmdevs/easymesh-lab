@@ -1,5 +1,7 @@
 # Teaching panel
 
+[Documents](../README.md)
+
 | View | Learning task |
 | --- | --- |
 | Live wire | Inspect CMDU headers, TLV boundaries, raw bytes, request/response MIDs |

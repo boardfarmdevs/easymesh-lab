@@ -1,5 +1,7 @@
 # A second extender on a wireless backhaul
 
+[Documents](../README.md)
+
 Experimental. The first extender (the RE653BE on USB Ethernet, the controller's
 `--target`) stays the **primary agent** and behaves exactly as before. A second
 extender, a TP-Link RE715X (hardware 2.6, firmware 1.2.0 Build 20241210), was

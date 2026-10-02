@@ -68,11 +68,11 @@ existing credentials and onboarding pause state. No DHCP server is started.
 
 ## Optional managed Wi-Fi clients
 
-Follow [USB Wi-Fi clients](../../docs/USB-WIFI-CLIENTS.md) to install the
+Follow [USB Wi-Fi clients](../../docs/guides/usb-wifi-clients.md) to install the
 committed service and enroll specific adapter MACs in the private
 `/etc/easymesh-wifi-clients.json`. USB attachment alone does not enroll a client.
 The controller supports initial 2.4/5 GHz provisioning; the RE653BE's 6 GHz
-configuration may still require its own UI. See [USB performance findings](../../docs/USB-PERFORMANCE.md).
+configuration may still require its own UI. See [USB performance findings](../../docs/records/usb-performance.md).
 
 ## Cutover and exclusive ownership
 

@@ -1,5 +1,7 @@
 # Controller-side optimizer
 
+[Documents](../README.md)
+
 EasyMesh separates controller policy decisions from agent execution. This project models optimization as a Python component inside the controller application, not as another mesh agent. An agent sends measurements and executes controller steering requests; the client can decline or choose a different association.
 
 `optimizer.py` supplies an advisory policy and an explicit execution boundary. The panel state includes `optimizer`, and the agent topology inspector shows why each client is being observed rather than moved. No automatic steering is enabled or transmitted by this component.

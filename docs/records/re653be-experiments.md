@@ -1,5 +1,7 @@
 # RE653BE experiment summary
 
+[Documents](../README.md)
+
 These are observations from one device/firmware configuration, not promises about all EasyMesh agents. Device identities, credentials, raw packets and browser sessions are omitted from this public summary; the original evidence is retained privately.
 
 | Experiment | Observed outcome |
