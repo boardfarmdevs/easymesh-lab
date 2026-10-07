@@ -25,7 +25,11 @@ not a bit-identical image build. The lab subnet is fixed at 10.203.88.0/24.
 
 For a new host, initialize LXD and select/create a bridge and pool appropriate
 for that host. Inspect the resulting names with `lxc network list` and
-`lxc storage list`; the builder does not change shared host networks:
+`lxc storage list`; the builder does not change shared host networks. On the
+EasyMesh lab hosts (rev120, rev140, rev150) use `--pool labs`, the host's one ZFS
+pool for lab VMs (easymesh-resources lab-storage): snapshots and copies there are
+copy-on-write, where a `dir` pool copies the whole disk (49 GB for this VM's one
+snapshot on rev120):
 
 ```sh
 lxd init
